@@ -9,7 +9,8 @@ run: build
 
 
 lint:
-	golangci-lint run --enable-all
+	golangci-lint fmt
+	golangci-lint run
 
 clean:
 	go clean

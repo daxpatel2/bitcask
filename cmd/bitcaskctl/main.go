@@ -1,9 +1,7 @@
 package main
 
-import (
-	"bitcask/internal/store"
-)
+import "fmt"
 
 func main() {
-	store.Put()
+	fmt.Println("ok")
 }

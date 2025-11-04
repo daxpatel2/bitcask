@@ -143,17 +143,17 @@ func (s *Store) Close() error {
 	return nil
 }
 
-var KeyNotFound = errors.New("key not found")
-var FileNotOpen = errors.New("file not open")
+var ErrKeyNotFound = errors.New("key not found")
+var ErrFileNotOpen = errors.New("file not open")
 
 func (s *Store) Get(key string) ([]byte, error) {
 	if s.File == nil {
-		return nil, FileNotOpen
+		return nil, ErrFileNotOpen
 	}
 
 	entry, ok := s.KeyDir[key]
 	if !ok {
-		return nil, KeyNotFound
+		return nil, ErrKeyNotFound
 	}
 
 	// to get the value, read amount (size) from file starting at offset
