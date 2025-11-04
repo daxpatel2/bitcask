@@ -1,0 +1,4 @@
+{
+  "makefile.configureOnOpen": true,
+  "cSpell.words": ["bitcask", "bitcaskctl"]
+}
