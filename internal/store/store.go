@@ -92,6 +92,7 @@ func Open(path string) (*Store, error) {
 	keyDir := make(map[string]Entry)
 
 	var offset int64 = 0
+
 	for {
 		header := make([]byte, 8)
 		n, err := file.ReadAt(header, offset)
@@ -108,14 +109,22 @@ func Open(path string) (*Store, error) {
 		keyLen := binary.LittleEndian.Uint32(header[0:4])
 		valueLen := binary.LittleEndian.Uint32(header[4:8])
 
-		// Step 3: read key
+		// create a buffer to read key
 		keyBuf := make([]byte, keyLen)
+		// Step 3: read key
 		_, err = file.ReadAt(keyBuf, offset+8)
 		if err != nil {
 			return nil, fmt.Errorf("read key: %w", err)
 		}
-		keyDir[string(keyBuf)] = Entry{offset + 8 + int64(keyLen), int64(valueLen)}
+
+		if valueLen == 0 {
+			// encountered a tombstone
+			delete(keyDir, string(keyBuf)) // tombstone → remove key
+		} else {
+			keyDir[string(keyBuf)] = Entry{offset + 8 + int64(keyLen), int64(valueLen)}
+		}
 		offset += 8 + int64(keyLen) + int64(valueLen)
+
 	}
 
 	store := &Store{
@@ -166,4 +175,30 @@ func (s *Store) Get(key string) ([]byte, error) {
 		return nil, err
 	}
 	return buf, nil
+}
+
+// can make PUT more robust by checking if the write is a tombstone
+func (s *Store) Delete(key string) error {
+	err := s.Put(key, "")
+	if err != nil {
+		return err
+	}
+	delete(s.KeyDir, key)
+	return nil
+}
+
+func (s *Store) Compact() error {
+
+	//create a new file to store the values
+	//newPath := s.Path + ".compact"
+
+	//open it
+	//newS, _ := Open(newPath)
+
+	// loop trough current file and add each entry to map and file
+	// this works because of a key is updated later down the line, it will update
+	// during this loop and stor only one copy
+	// deleteing would remove it from memory so we wont write anything to the file
+
+	return nil
 }
