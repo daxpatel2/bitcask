@@ -1,3 +1,5 @@
+// Package store provides a key-value store implementation based on the Bitcask paper.
+// It uses a log-structured hash table to provide fast key-value data storage.
 package store
 
 import (
@@ -10,17 +12,29 @@ import (
 	"path/filepath"
 )
 
+// Store represents a Bitcask key-value store.
+// It holds the in-memory index and the file handle for the data file.
 type Store struct {
-	KeyDir map[string]Entry
-	File   *os.File
-	Path   string
+	KeyDir map[string]Entry // KeyDir is the in-memory index of keys to their locations in the data file.
+	File   *os.File         // File is the handle to the active data file.
+	Path   string           // Path is the path to the data file.
 }
 
+// Entry represents the metadata for a value stored in the data file.
 type Entry struct {
-	Offset int64
-	Size   int64
+	Offset int64 // Offset is the byte offset where the value begins in the data file.
+	Size   int64 // Size is the size of the value in bytes.
 }
 
+// Put adds or updates a key-value pair in the store.
+// It appends the new data to the end of the data file and updates the in-memory index.
+//
+// Parameters:
+//   key: The key to add or update.
+//   value: The value to associate with the key.
+//
+// Returns:
+//   An error if the write operation fails.
 func (s *Store) Put(key string, value string) error {
 	offset, err := s.File.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -77,6 +91,15 @@ func (s *Store) Put(key string, value string) error {
 	return nil
 }
 
+// Open opens a Bitcask store at the given path.
+// If the file does not exist, it will be created.
+// It rebuilds the in-memory index by reading the data file from the beginning.
+//
+// Parameters:
+//   path: The path to the data file.
+//
+// Returns:
+//   A pointer to the opened Store and an error if any operation fails.
 func Open(path string) (*Store, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -136,6 +159,10 @@ func Open(path string) (*Store, error) {
 	return store, nil
 }
 
+// Close closes the store, releasing the file handle and clearing the in-memory index.
+//
+// Returns:
+//   An error if the file cannot be closed.
 func (s *Store) Close() error {
 	if s.File != nil {
 		if err := s.File.Close(); err != nil {
@@ -152,9 +179,19 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// ErrKeyNotFound is returned when a key is not found in the store.
 var ErrKeyNotFound = errors.New("key not found")
+
+// ErrFileNotOpen is returned when an operation is attempted on a closed store.
 var ErrFileNotOpen = errors.New("file not open")
 
+// Get retrieves the value for a given key from the store.
+//
+// Parameters:
+//   key: The key to retrieve.
+//
+// Returns:
+//   The value associated with the key, or an error if the key is not found or the read fails.
 func (s *Store) Get(key string) ([]byte, error) {
 	if s.File == nil {
 		return nil, ErrFileNotOpen
@@ -177,7 +214,14 @@ func (s *Store) Get(key string) ([]byte, error) {
 	return buf, nil
 }
 
-// can make PUT more robust by checking if the write is a tombstone
+// Delete removes a key from the store.
+// It does this by writing a special "tombstone" record to the data file.
+//
+// Parameters:
+//   key: The key to delete.
+//
+// Returns:
+//   An error if the write operation fails.
 func (s *Store) Delete(key string) error {
 	err := s.Put(key, "")
 	if err != nil {
@@ -187,6 +231,11 @@ func (s *Store) Delete(key string) error {
 	return nil
 }
 
+// Compact reclaims space by removing stale data from the data file.
+// This operation is not yet implemented.
+//
+// Returns:
+//   An error if the compaction process fails.
 func (s *Store) Compact() error {
 
 	//create a new file to store the values

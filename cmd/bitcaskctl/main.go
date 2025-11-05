@@ -1,3 +1,4 @@
+// The bitcaskctl tool is a command-line interface for interacting with a Bitcask store.
 package main
 
 import (

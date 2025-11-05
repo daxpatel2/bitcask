@@ -238,3 +238,62 @@ Write each live key-value pair to a new log file.
 Once complete, atomically swap the new file for the old one.
 
 This process would reclaim all the space lost to old updates and tombstones, and it can be run in the background without blocking reads or writes.
+
+## Setup and Usage
+
+To use this library, you can import it into your Go project:
+
+```go
+import "bitcask/internal/store"
+```
+
+### Example
+
+Here is a simple example of how to use the store:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"bitcask/internal/store"
+)
+
+func main() {
+	// Open a new store.
+	s, err := store.Open("./my.data")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer s.Close()
+
+	// Put a key-value pair.
+	if err := s.Put("hello", "world"); err != nil {
+		log.Fatal(err)
+	}
+
+	// Get a value.
+	val, err := s.Get("hello")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(string(val)) // "world"
+
+	// Delete a key.
+	if err := s.Delete("hello"); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+## Building from Source
+
+You can build the `bitcaskctl` command-line tool from source:
+
+```bash
+make build
+```
+
+This will create a `bitcaskctl` binary in the `target` directory.
