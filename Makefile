@@ -4,7 +4,7 @@ BINARY_NAME=hello-world
 #build:
 #	gox -osarch="darwin/amd64 linux/amd64 windows/amd64" -output="target/{{.Dir}}_{{.OS}}_{{.Arch}}" ./cmd/bitcaskctl
 #
-run:
+run: lint
 	go run cmd/bitcaskctl/main.go
 
 

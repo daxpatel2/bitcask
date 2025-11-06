@@ -8,12 +8,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type Store struct {
 	KeyDir map[string]Entry
 	File   *os.File
 	Path   string
+	Mutex  sync.Mutex
 }
 
 type Entry struct {
@@ -21,7 +23,12 @@ type Entry struct {
 	Size   int64
 }
 
+const HEADERSIZE = 8
+
 func (s *Store) Put(key string, value string) error {
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock() // this will unlock mutexes when function returns if we dont do mutex unlock after returns
+
 	offset, err := s.File.Seek(0, io.SeekEnd)
 	if err != nil {
 		return fmt.Errorf("failed to seek EOF: %w", err)
@@ -38,12 +45,15 @@ func (s *Store) Put(key string, value string) error {
 	Header -> keylen + valuelen
 	payload -> key + value
 	*/
-
 	buf := new(bytes.Buffer)
 	keyLen := uint32(len(key))
 	valLen := uint32(len(value))
 
-	// write the keylen and valuelen in binary format
+	// if the value is empty ->"", this is an indication of a tombstone
+	// we need to remove this value from memory
+
+	//write only keyLen,valLen, key, and 0 to file
+	// create the buffer for keylen and valuelen in binary format firs
 	if err := binary.Write(buf, binary.LittleEndian, keyLen); err != nil {
 		return fmt.Errorf("failed to write key length: %w", err)
 	}
@@ -59,6 +69,7 @@ func (s *Store) Put(key string, value string) error {
 		return fmt.Errorf("failed to write value bytes: %w", err)
 	}
 
+	// finally write the PAYLOAD to the file
 	if _, err := s.File.Write(buf.Bytes()); err != nil {
 		return fmt.Errorf("failed to write record: %w", err)
 	}
@@ -68,12 +79,15 @@ func (s *Store) Put(key string, value string) error {
 		return fmt.Errorf("failed to sync file: %w", err)
 	}
 
-	entry := Entry{
-		Size:   int64(len(value)),            // how much the actual value is (we can simply just read this much instantly
-		Offset: offset + 8 + int64(len(key)), // offset (beggining of our header) + 8 bytes (keylen + valuelen) + len(key) (since we also write the key)
-		// we can start reading straight from the value part and skip parsing the header again
+	if valLen != 0 {
+		entry := Entry{
+			Size:   int64(len(value)),            // how much the actual value is (we can simply just read this much instantly
+			Offset: offset + 8 + int64(len(key)), // offset (beggining of our header) + 8 bytes (keylen + valuelen) + len(key) (since we also write the key)
+			// we can start reading straight from the value part and skip parsing the header again
+		}
+		s.KeyDir[key] = entry
 	}
-	s.KeyDir[key] = entry
+
 	return nil
 }
 
@@ -86,6 +100,21 @@ func Open(path string) (*Store, error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", path, err)
+	}
+
+	// check if this was an empty file
+	inf, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file %s: %w", path, err)
+	} else {
+		if inf.Size() == 0 {
+			store := &Store{
+				File:   file,
+				KeyDir: make(map[string]Entry),
+				Path:   path,
+			}
+			return store, nil
+		}
 	}
 
 	// we will need to rebuild the map dir from the contents of the file, if it's not empty
@@ -138,16 +167,19 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error {
 	if s.File != nil {
+		s.Mutex.Lock()
 		if err := s.File.Close(); err != nil {
+			s.Mutex.Unlock()
 			return fmt.Errorf("failed to close file: %w", err)
 		}
-	}
-	// once the file is closed, we can dereference all the data that was used in memory
+		// once the file is closed, we can dereference all the data that was used in memory
 
-	// Wipe memory-heavy data structures -> they will get GC'd and cleaned
-	s.KeyDir = nil
-	s.File = nil
-	s.Path = ""
+		// Wipe memory-heavy data structures -> they will get GC'd and cleaned
+		s.KeyDir = nil
+		s.File = nil
+		s.Path = ""
+		s.Mutex.Unlock()
+	}
 
 	return nil
 }
@@ -177,28 +209,117 @@ func (s *Store) Get(key string) ([]byte, error) {
 	return buf, nil
 }
 
-// can make PUT more robust by checking if the write is a tombstone
 func (s *Store) Delete(key string) error {
-	err := s.Put(key, "")
-	if err != nil {
-		return err
-	}
-	delete(s.KeyDir, key)
-	return nil
+	return s.Put(key, "")
 }
 
 func (s *Store) Compact() error {
+	// lock mu to pause any operations new writes while we compact
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock()
 
-	//create a new file to store the values
-	//newPath := s.Path + ".compact"
+	if s.File == nil {
+		return ErrFileNotOpen
+	}
 
-	//open it
-	//newS, _ := Open(newPath)
+	// 1) Create temp file in the SAME directory for atomic rename.
+	tmpPath := s.Path + ".compact"
+	tmpFile, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", tmpPath, err)
+	}
 
-	// loop trough current file and add each entry to map and file
-	// this works because of a key is updated later down the line, it will update
-	// during this loop and stor only one copy
-	// deleteing would remove it from memory so we wont write anything to the file
+	//new in mem map
+	newKeyDir := make(map[string]Entry, len(s.KeyDir))
+	// loop through the current open file
+	for key, entry := range s.KeyDir {
+		// Read the current value directly from the old file using stored offsets.
+		val := make([]byte, entry.Size)
+		if entry.Size > 0 {
+			if _, err := s.File.ReadAt(val, entry.Offset); err != nil && err != io.EOF {
+				_ = tmpFile.Close()
+				return fmt.Errorf("read value for key %q: %w", key, err)
+			}
+		}
+
+		// Prepare one record: [keyLen][valLen][key][value]=empty is tombstone.
+		keyBytes := []byte(key)
+		keyLen := uint32(len(keyBytes))
+		valLen := uint32(len(val))
+
+		// Find where we'll write in the temp file (to compute value offset).
+		off, err := tmpFile.Seek(0, io.SeekEnd)
+		if err != nil {
+			_ = tmpFile.Close()
+			return fmt.Errorf("seek compact file EOF: %w", err)
+		}
+
+		buf := new(bytes.Buffer)
+
+		if err := binary.Write(buf, binary.LittleEndian, keyLen); err != nil {
+			_ = tmpFile.Close()
+			return fmt.Errorf("write keyLen: %w", err)
+		}
+		if err := binary.Write(buf, binary.LittleEndian, valLen); err != nil {
+			_ = tmpFile.Close()
+			return fmt.Errorf("write valLen: %w", err)
+		}
+		if _, err := buf.Write(keyBytes); err != nil {
+			_ = tmpFile.Close()
+			return fmt.Errorf("write key bytes: %w", err)
+		}
+		if valLen > 0 {
+			if _, err := buf.Write(val); err != nil {
+				_ = tmpFile.Close()
+				return fmt.Errorf("write value bytes: %w", err)
+			}
+		}
+
+		if _, err := tmpFile.Write(buf.Bytes()); err != nil {
+			_ = tmpFile.Close()
+			return fmt.Errorf("append compact record: %w", err)
+		}
+		if err := tmpFile.Sync(); err != nil {
+			_ = tmpFile.Close()
+			return fmt.Errorf("sync compact record: %w", err)
+		}
+
+		// Record new value location in the compacted file.
+		newValOffset := off + HEADERSIZE + int64(len(keyBytes))
+		newKeyDir[key] = Entry{Offset: newValOffset, Size: int64(valLen)}
+	}
+
+	// 3) Finish temp writes.
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("final sync compact file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close compact file: %w", err)
+	}
+
+	// 4) Close old file
+	if err := s.File.Close(); err != nil {
+		return fmt.Errorf("close old file: %w", err)
+	}
+
+	// 5) Atomically replace old with compacted file.
+	//    (On same filesystem, Rename is atomic.)
+	if err := os.Rename(tmpPath, s.Path); err != nil {
+		// Best-effort recovery: try to reopen the old file so the store remains usable.
+		if f, openErr := os.OpenFile(s.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644); openErr == nil {
+			s.File = f
+		}
+		return fmt.Errorf("rename compact file: %w", err)
+	}
+
+	// 6) Reopen the new canonical file and swap in the new index.
+	f, err := os.OpenFile(s.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("reopen compacted file: %w", err)
+	}
+	s.File = f
+	s.KeyDir = newKeyDir
 
 	return nil
 }
