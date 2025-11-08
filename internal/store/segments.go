@@ -2,25 +2,33 @@ package store
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path"
 )
-
-const segmentExt = ".data"
-const maxSegmentBytes = 1024 * 1024
 
 func segmentPath(dir string, segId int) string {
 	return path.Join(fmt.Sprintf("%s/%06d%s", dir, segId, segmentExt))
 }
 
-func maybeRotate(activeSize int64) bool {
-	if activeSize > maxSegmentBytes {
-		return true
+func maybeRotate(s *FileStore) error {
+
+	activeSize, err := s.Files[s.ActiveSegID].Seek(0, io.SeekEnd)
+	if err != nil {
+		return ErrSeekingIO
 	}
-	return false
+
+	if activeSize > maxSegmentBytes {
+		err = rotate(s)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-func rotate(s *Store) error {
+func rotate(s *FileStore) error {
 	// close the active file
 	_ = s.Files[s.ActiveSegID].Close()
 

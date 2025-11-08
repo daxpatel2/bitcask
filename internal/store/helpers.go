@@ -17,7 +17,7 @@ import (
 func writeHintFile(hintPath string, keyDir map[string]Entry) error {
 
 	// create or open the global hint file if it doesn't exist
-	tmp := hintPath + hintTmpExt
+	tmp := hintPath + tmpExtension
 	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("error opening hint file: %w", err)
@@ -73,7 +73,7 @@ func writeHintFile(hintPath string, keyDir map[string]Entry) error {
 	return nil
 }
 
-// loadHintFile reads a hint file into a fresh KeyDir map.
+// loadHintFile reads a hint file into a fresh DataMap map.
 func loadHintFile(hintPath string) (map[string]Entry, error) {
 	f, err := os.Open(hintPath)
 	if err != nil {
@@ -112,24 +112,24 @@ func loadHintFile(hintPath string) (map[string]Entry, error) {
 	return keyDir, nil
 }
 
-// WriteHint writes the current KeyDir to <data>.hint under a read lock
+// WriteHint writes the current DataMap to <data>.hint under a read lock
 // so writers are paused and the snapshot is consistent.
-func (s *Store) WriteHint() error {
+func (s *FileStore) WriteHint() error {
 	hint := hintPath(s.Path)
 
-	s.Mutex.RLock()
-	defer s.Mutex.RUnlock()
+	s.RWMux.RLock()
+	defer s.RWMux.RUnlock()
 
 	if s.Files[s.ActiveSegID] == nil {
 		return ErrFileNotOpen
 	}
-	return writeHintFile(hint, s.KeyDir)
+	return writeHintFile(hint, s.DataMap)
 }
 
-// writeHintLocked writes a hint while the caller already holds s.Mutex (write lock).
-func (s *Store) writeHintLocked() error {
+// writeHintLocked writes a hint while the caller already holds s.RWMux (write lock).
+func (s *FileStore) writeHintLocked() error {
 	hintPath := hintPath(s.Path)
-	return writeHintFile(hintPath, s.KeyDir)
+	return writeHintFile(hintPath, s.DataMap)
 }
 
 func scanDir(dir string) ([]os.DirEntry, error) {

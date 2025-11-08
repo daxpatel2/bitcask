@@ -4,7 +4,7 @@
 
 This repository contains a Go implementation of a Key-Value (KV) store based on the design principles of Bitcask. Bitcask is a highly efficient embedded database model, described as a Log-Structured Hash Table for Fast Key/Value Data.
 
-In simple terms, all data is written sequentially to an append-only log file. A separate in-memory index, the KeyDir, holds a pointer for each key, directing to the precise byte-offset of its value in the log. This design minimizes disk seeks and provides exceptionally high read/write throughput, making it ideal for production-grade traffic.
+In simple terms, all data is written sequentially to an append-only log file. A separate in-memory index, the DataMap, holds a pointer for each key, directing to the precise byte-offset of its value in the log. This design minimizes disk seeks and provides exceptionally high read/write throughput, making it ideal for production-grade traffic.
 
 ### Core Design Principles
 
@@ -28,17 +28,17 @@ Key: The raw bytes of the key itself.
 
 Value: The raw bytes of the value.
 
-2. The KeyDir: An In-Memory Index
+2. The DataMap: An In-Memory Index
 
-The KeyDir is the secret sauce. It is an in-memory hash table (map) that stores all keys present in the database. Each key maps to an Entry struct that tells the store exactly where to find the value and how large it is, enabling a read operation with a single disk seek.
+The DataMap is the secret sauce. It is an in-memory hash table (map) that stores all keys present in the database. Each key maps to an Entry struct that tells the store exactly where to find the value and how large it is, enabling a read operation with a single disk seek.
 
 This implementation is defined by these core Go structs:
 
 package store
 
-// Store holds the active file handle and the in-memory index.
-type Store struct {
-KeyDir map[string]Entry
+// FileStore holds the active file handle and the in-memory index.
+type FileStore struct {
+DataMap map[string]Entry
 File   *os.File
 Path   string
 }
@@ -57,11 +57,11 @@ Here is how the core operations are implemented, linking the Bitcask theory to t
 
 Writing Data (Put)
 
-When a new KV pair is submitted, the engine appends it to the active datafile and then updates the KeyDir with the new position. This requires just one disk write (an append, which is very fast) and an in-memory map update.
+When a new KV pair is submitted, the engine appends it to the active datafile and then updates the DataMap with the new position. This requires just one disk write (an append, which is very fast) and an in-memory map update.
 
 The Put function serializes the key and value according to the on-disk format:
 
-func (s *Store) Put(key string, value string) error {
+func (s *FileStore) Put(key string, value string) error {
 offset, err := s.File.Seek(0, io.SeekEnd)
 if err != nil {
 return fmt.Errorf("failed to seek EOF: %w", err)
@@ -101,22 +101,22 @@ return fmt.Errorf("failed to seek EOF: %w", err)
        // Note: The offset points *past* the header and key, directly to the value.
        Offset: offset + 8 + int64(len(key)), 
     }
-    s.KeyDir[key] = entry
+    s.DataMap[key] = entry
     return nil
 }
 
 
 Reading Data (Get)
 
-Reading a value is extremely fast. It requires one O(1) lookup in the in-memory KeyDir followed by a single disk seek and read. We find the entry, seek to the Offset, and read Size bytes.
+Reading a value is extremely fast. It requires one O(1) lookup in the in-memory DataMap followed by a single disk seek and read. We find the entry, seek to the Offset, and read Size bytes.
 
-func (s *Store) Get(key string) ([]byte, error) {
+func (s *FileStore) Get(key string) ([]byte, error) {
 if s.File == nil {
 return nil, ErrFileNotOpen
 }
 
     // 1. O(1) hash map lookup
-    entry, ok := s.KeyDir[key]
+    entry, ok := s.DataMap[key]
     if !ok {
        return nil, ErrKeyNotFound
     }
@@ -136,29 +136,29 @@ return nil, ErrFileNotOpen
 
 Deleting Data (Delete)
 
-Deletion is a special case of a Put. To delete a key, we simply Put a new entry for that key with a special "tombstone" value—in this case, an empty string (""). We then remove the key from the in-memory KeyDir.
+Deletion is a special case of a Put. To delete a key, we simply Put a new entry for that key with a special "tombstone" value—in this case, an empty string (""). We then remove the key from the in-memory DataMap.
 
 The tombstone entry in the log file is crucial for the compaction process.
 
-func (s *Store) Delete(key string) error {
+func (s *FileStore) Delete(key string) error {
 // Write a tombstone record.
 err := s.Put(key, "")
 if err != nil {
 return err
 }
 // Remove from the in-memory index.
-delete(s.KeyDir, key)
+delete(s.DataMap, key)
 return nil
 }
 
 
 Crash Recovery & Startup (Open)
 
-The most critical piece of the design is recovery. If the store is shut down or crashes, the in-memory KeyDir is lost. The Open function rebuilds the entire KeyDir by reading the log file from beginning to end, one entry at a time.
+The most critical piece of the design is recovery. If the store is shut down or crashes, the in-memory DataMap is lost. The Open function rebuilds the entire DataMap by reading the log file from beginning to end, one entry at a time.
 
 Because later entries for the same key supersede earlier ones, this process correctly reconstructs the final state of the database.
 
-func Open(path string) (*Store, error) {
+func Open(path string) (*FileStore, error) {
 // ... (File opening logic) ...
 
     // we will need to rebuild the map dir from the contents of the file
@@ -195,9 +195,9 @@ func Open(path string) (*Store, error) {
        offset += 8 + int64(keyLen) + int64(valueLen)
     }
 
-    store := &Store{
+    store := &FileStore{
        File:   file,
-       KeyDir: keyDir,
+       DataMap: keyDir,
        Path:   path,
     }
 
@@ -221,7 +221,7 @@ Simple Backups: Backing up is as simple as copying the data file.
 
 Weaknesses
 
-RAM Constraint: The KeyDir holds all keys in memory. This implementation's primary limiting factor is the amount of system RAM available to hold the entire keyspace.
+RAM Constraint: The DataMap holds all keys in memory. This implementation's primary limiting factor is the amount of system RAM available to hold the entire keyspace.
 
 Future Considerations
 
@@ -231,7 +231,7 @@ As seen in the Update and Delete operations, old data entries are left dangling 
 
 A future implementation of Compact would:
 
-Iterate over all keys in the current KeyDir.
+Iterate over all keys in the current DataMap.
 
 Write each live key-value pair to a new log file.
 
