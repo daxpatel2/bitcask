@@ -8,23 +8,30 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 type Store struct {
-	KeyDir map[string]Entry
-	File   *os.File
-	Path   string
-	Mutex  sync.RWMutex
+	KeyDir      map[string]Entry
+	Files       map[int]*os.File
+	ActiveSegID int
+	NextSegID   int
+	Path        string
+	Mutex       sync.RWMutex
 }
 
 type Entry struct {
 	Offset int64
 	Size   int64
+	SegID  int //since there are more files that can be operated on, we need to know which file its in
 }
 
-const HEADERSIZE = 8
-const hintExt = ".hint"
+const headerSize = 8
+const hintFileName = "bitcask.hint"
 const hintTmpExt = ".tmp"
 
 var ErrKeyNotFound = errors.New("key not found")
@@ -51,7 +58,7 @@ func (s *Store) Put(key string, value string) error {
 
 	s.Mutex.Lock()
 	defer s.Mutex.Unlock() // this will unlock mutexes when function returns if we don't do mutex unlock a
-	offset, err := s.File.Seek(0, io.SeekEnd)
+	offset, err := s.Files[s.ActiveSegID].Seek(0, io.SeekEnd)
 	if err != nil {
 		return fmt.Errorf("failed to seek EOF: %w", err)
 	}
@@ -73,135 +80,175 @@ func (s *Store) Put(key string, value string) error {
 	}
 
 	// finally write the PAYLOAD to the file
-	if _, err := s.File.Write(buf.Bytes()); err != nil {
+	if _, err := s.Files[s.ActiveSegID].Write(buf.Bytes()); err != nil {
 		return fmt.Errorf("failed to write record: %w", err)
 	}
 
 	// Ensure it’s flushed to disk
-	if err := s.File.Sync(); err != nil {
+	if err := s.Files[s.ActiveSegID].Sync(); err != nil {
 		return fmt.Errorf("failed to sync file: %w", err)
 	}
 
 	if valLen != 0 {
 		entry := Entry{
 			Size:   int64(len(value)),                     // how much the actual value is (we can simply just read this much instantly
-			Offset: offset + HEADERSIZE + int64(len(key)), // offset (beggining of our header) + 8 bytes (keylen + valuelen) + len(key) (since we also write the key)
+			Offset: offset + headerSize + int64(len(key)), // offset (beggining of our header) + 8 bytes (keylen + valuelen) + len(key) (since we also write the key)
 			// we can start reading straight from the value part and skip parsing the header again
+			SegID: s.ActiveSegID,
 		}
 		s.KeyDir[key] = entry
 	} else {
 		delete(s.KeyDir, key)
 	}
 
+	activeSize, err := s.Files[s.ActiveSegID].Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("failed to seek EOF: %w", err)
+	}
+
+	if maybeRotate(activeSize) {
+		err = rotate(s)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func Open(path string) (*Store, error) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
-	}
+func Open(dir string) (*Store, error) {
+	files := make(map[int]*os.File)
+	keyDir := make(map[string]Entry)
+	segIds := filterSegmentFiles(dir)
 
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file %s: %w", path, err)
-	}
-
-	// check if this was an empty file
-	inf, err := os.Stat(path)
-	if err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("failed to stat file %s: %w", path, err)
-	}
-
-	// check if hint exists, if yes than load everything into memory
-	hintPath := path + hintExt
-	if hintInfo, err := os.Stat(hintPath); err == nil {
-		// use hint if its newer than datafile
-		if !hintInfo.ModTime().Before(inf.ModTime()) {
-			if kd, err := loadHintFile(hintPath); err == nil {
-				return &Store{
-					KeyDir: kd,
-					File:   file,
-					Path:   path,
-				}, nil
-			}
+	// there are no previous data files
+	if len(segIds) == 0 {
+		// create a datafile, name it, and return the store
+		segId := 1
+		p := filepath.Join(dir, fmt.Sprintf("%06d%s", segId, segmentExt))
+		file, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file %s: %w", dir, err)
 		}
-	}
-
-	// if the datafile is empty (potentially new instance etc...)
-	// then there is no keydir to return
-	// just return a store
-	if inf.Size() == 0 {
+		files[segId] = file
 		return &Store{
-			File:   file,
-			KeyDir: make(map[string]Entry),
-			Path:   path,
+			KeyDir:      keyDir,
+			Files:       files,
+			ActiveSegID: segId,
+			NextSegID:   2,
+			Path:        p,
 		}, nil
 	}
 
-	// we will need to rebuild the map dir from the contents of the file, if it's not empty
-	keyDir := make(map[string]Entry)
-
-	var offset int64 = 0
-
-	for {
-		header := make([]byte, HEADERSIZE)
-		n, err := file.ReadAt(header, offset)
-		if err == io.EOF || n == 0 {
-			break // reached end of file
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read header: %w", err)
-		}
-
-		// 2. decode keylen and valuelen
-		// first 4 -> keylen
-		// last 4 -> valuelen
-		keyLen := binary.LittleEndian.Uint32(header[0:4])
-		valueLen := binary.LittleEndian.Uint32(header[4:8])
-
-		// create a buffer to read key
-		keyBuf := make([]byte, keyLen)
-		// Step 3: read key
-		_, err = file.ReadAt(keyBuf, offset+HEADERSIZE)
-		if err != nil {
-			return nil, fmt.Errorf("read key: %w", err)
-		}
-
-		if valueLen == 0 {
-			// encountered a tombstone
-			delete(keyDir, string(keyBuf)) // tombstone → remove key
+	for i, segId := range segIds {
+		p := filepath.Join(dir, fmt.Sprintf("%06d%s", segId, segmentExt))
+		var flags int
+		// the latest file gets append permissions (latest = highest segId number)
+		if i == len(segIds)-1 {
+			flags = os.O_RDWR | os.O_APPEND
 		} else {
-			keyDir[string(keyBuf)] = Entry{offset + HEADERSIZE + int64(keyLen), int64(valueLen)}
+			// the rest are read only
+			flags = os.O_RDONLY
 		}
-		offset += HEADERSIZE + int64(keyLen) + int64(valueLen)
+		f, err := os.OpenFile(p, flags, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file %s: %w", dir, err)
+		}
+		files[segId] = f
+	}
 
+	active := segIds[len(segIds)-1]
+
+	//check for hintfile and loadkey dir from there, otherwise fallback to scanning
+	hp := hintPath(dir)
+	if hi, err := os.Stat(hp); err == nil {
+		if newest, err := latestSegmentMTime(dir, segIds); err == nil {
+			// If hint is at least as new as the newest .data segment, trust it.
+			if !hi.ModTime().Before(newest) {
+				if kd, err := loadHintFile(hp); err == nil {
+					return &Store{
+						KeyDir:      kd,
+						Files:       files,  // already opened map[int]*os.File
+						ActiveSegID: active, // highest segID you opened RW|APPEND
+						NextSegID:   active + 1,
+						Path:        dir,
+					}, nil
+				}
+			}
+		}
+		var offset int64 = 0
+		for {
+			header := make([]byte, headerSize)
+			n, err := f.ReadAt(header, offset)
+			if err == io.EOF && n == 0 {
+				break // reached end of file
+			}
+			if err != nil {
+				return nil, fmt.Errorf("read header seg %06d of %d:%w", segId, offset, err)
+			}
+
+			if n < headerSize {
+				// Incomplete tail; stop at last good offset.
+				break
+			}
+
+			keyLen := binary.LittleEndian.Uint32(header[0:4])
+			valueLen := binary.LittleEndian.Uint32(header[4:8])
+
+			if keyLen == 0 {
+				break
+			}
+
+			// create a buffer to read key
+			keyBuf := make([]byte, keyLen)
+			// Step 3: read key
+			_, err = f.ReadAt(keyBuf, offset+headerSize)
+			if err != nil {
+				return nil, fmt.Errorf("read key: %w", err)
+			}
+
+			if valueLen == 0 {
+				// encountered a tombstone
+				delete(keyDir, string(keyBuf)) // tombstone → remove key
+			} else {
+				valOff := offset + int64(headerSize) + int64(keyLen)
+				keyDir[string(keyBuf)] = Entry{
+					Offset: valOff,
+					Size:   int64(valueLen),
+					SegID:  segId,
+				}
+			}
+			offset += headerSize + int64(keyLen) + int64(valueLen)
+		}
 	}
 
 	return &Store{
-		File:   file,
-		KeyDir: keyDir,
-		Path:   path,
+		KeyDir:      keyDir,
+		Files:       files,
+		ActiveSegID: active,
+		NextSegID:   active + 1,
+		Path:        dir,
 	}, nil
+
 }
 
 func (s *Store) Close() error {
-	if s.File != nil {
+	if s.Files[s.ActiveSegID] != nil {
 		s.Mutex.Lock()
 		defer s.Mutex.Unlock()
 
 		_ = s.writeHintLocked()
 
-		if err := s.File.Close(); err != nil {
-			s.Mutex.Unlock()
-			return fmt.Errorf("failed to close file: %w", err)
+		for segId, _ := range s.Files {
+			err := s.Files[segId].Close()
+			if err != nil {
+				return fmt.Errorf("failed to close file: %w", err)
+			}
 		}
-		// once the file is closed, we can dereference all the data that was used in memory
 
 		// Wipe memory-heavy data structures -> they will get GC'd and cleaned
 		s.KeyDir = nil
-		s.File = nil
+		s.Files = nil
 		s.Path = ""
 	}
 
@@ -209,23 +256,29 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Get(key string) ([]byte, error) {
-	if s.File == nil {
+	if s.Files[s.ActiveSegID] == nil {
 		return nil, ErrFileNotOpen
 	}
 
 	s.Mutex.RLock()
-	defer s.Mutex.RUnlock()
 	entry, ok := s.KeyDir[key]
 	if !ok {
+		s.Mutex.RUnlock()
 		return nil, ErrKeyNotFound
 	}
+	s.Mutex.RUnlock()
 
 	// to get the value, read amount (size) from file starting at offset
 	size := entry.Size
 	offset := entry.Offset
 
+	f := s.Files[entry.SegID]
+	if f == nil {
+		return nil, ErrFileNotOpen
+	}
+
 	buf := make([]byte, size)
-	_, err := s.File.ReadAt(buf, offset)
+	_, err := s.Files[entry.SegID].ReadAt(buf, offset)
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
@@ -241,7 +294,7 @@ func (s *Store) Compact() error {
 	s.Mutex.Lock()
 	defer s.Mutex.Unlock()
 
-	if s.File == nil {
+	if s.Files[s.ActiveSegID] == nil {
 		return ErrFileNotOpen
 	}
 
@@ -259,7 +312,7 @@ func (s *Store) Compact() error {
 		// Read the current value directly from the old file using stored offsets.
 		val := make([]byte, entry.Size)
 		if entry.Size > 0 {
-			if _, err := s.File.ReadAt(val, entry.Offset); err != nil && err != io.EOF {
+			if _, err := s.Files[s.ActiveSegID].ReadAt(val, entry.Offset); err != nil && err != io.EOF {
 				_ = tmpFile.Close()
 				return fmt.Errorf("read value for key %q: %w", key, err)
 			}
@@ -308,7 +361,7 @@ func (s *Store) Compact() error {
 		}
 
 		// Record new value location in the compacted file.
-		newValOffset := off + HEADERSIZE + int64(len(keyBytes))
+		newValOffset := off + headerSize + int64(len(keyBytes))
 		newKeyDir[key] = Entry{Offset: newValOffset, Size: int64(valLen)}
 	}
 
@@ -322,7 +375,7 @@ func (s *Store) Compact() error {
 	}
 
 	// 4) Close old file
-	if err := s.File.Close(); err != nil {
+	if err := s.Files[s.ActiveSegID].Close(); err != nil {
 		return fmt.Errorf("close old file: %w", err)
 	}
 
@@ -331,7 +384,7 @@ func (s *Store) Compact() error {
 	if err := os.Rename(tmpPath, s.Path); err != nil {
 		// Best-effort recovery: try to reopen the old file so the store remains usable.
 		if f, openErr := os.OpenFile(s.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644); openErr == nil {
-			s.File = f
+			s.Files[s.ActiveSegID] = f
 		}
 		return fmt.Errorf("rename compact file: %w", err)
 	}
@@ -341,7 +394,7 @@ func (s *Store) Compact() error {
 	if err != nil {
 		return fmt.Errorf("reopen compacted file: %w", err)
 	}
-	s.File = f
+	s.Files[s.ActiveSegID] = f
 	s.KeyDir = newKeyDir
 
 	if err := s.writeHintLocked(); err != nil {
@@ -349,111 +402,4 @@ func (s *Store) Compact() error {
 	}
 
 	return nil
-}
-
-// Format per record: [u32 keyLen][i64 offset][i64 size][keyBytes]
-func writeHintFile(hintPath string, keyDir map[string]Entry) error {
-
-	tmp := hintPath + hintTmpExt
-	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("open hint file: %w", err)
-	}
-
-	for k, e := range keyDir {
-		buf := new(bytes.Buffer)
-		keyBytes := []byte(k)
-		keyLen := uint32(len(keyBytes))
-
-		if err := binary.Write(buf, binary.LittleEndian, keyLen); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("write keyLen: %w", err)
-		}
-		if err := binary.Write(buf, binary.LittleEndian, e.Offset); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("write valLen: %w", err)
-		}
-		if err := binary.Write(buf, binary.LittleEndian, e.Size); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("write key bytes: %w", err)
-		}
-		if _, err := buf.Write(keyBytes); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("write key bytes: %w", err)
-		}
-
-		if _, err := f.Write(buf.Bytes()); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("write value bytes: %w", err)
-		}
-	}
-
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("final sync compact file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close compact file: %w", err)
-	}
-
-	if err := os.Rename(tmp, hintPath); err != nil {
-		return fmt.Errorf("rename compact file: %w", err)
-	}
-
-	return nil
-}
-
-// loadHintFile reads a hint file into a fresh KeyDir map.
-func loadHintFile(hintPath string) (map[string]Entry, error) {
-	f, err := os.Open(hintPath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	keyDir := make(map[string]Entry)
-	for {
-		var keyLen uint32
-		if err := binary.Read(f, binary.LittleEndian, &keyLen); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, fmt.Errorf("read keyLen: %w", err)
-		}
-		var off int64
-		if err := binary.Read(f, binary.LittleEndian, &off); err != nil {
-			return nil, fmt.Errorf("read offset: %w", err)
-		}
-		var sz int64
-		if err := binary.Read(f, binary.LittleEndian, &sz); err != nil {
-			return nil, fmt.Errorf("read size: %w", err)
-		}
-
-		kb := make([]byte, keyLen)
-		if _, err := io.ReadFull(f, kb); err != nil {
-			return nil, fmt.Errorf("read key bytes: %w", err)
-		}
-		keyDir[string(kb)] = Entry{Offset: off, Size: sz}
-	}
-	return keyDir, nil
-}
-
-// WriteHint writes the current KeyDir to <data>.hint under a read lock
-// so writers are paused and the snapshot is consistent.
-func (s *Store) WriteHint() error {
-	hintPath := s.Path + hintExt
-
-	s.Mutex.RLock()
-	defer s.Mutex.RUnlock()
-
-	if s.File == nil {
-		return ErrFileNotOpen
-	}
-	return writeHintFile(hintPath, s.KeyDir)
-}
-
-// writeHintLocked writes a hint while the caller already holds s.Mutex (write lock).
-func (s *Store) writeHintLocked() error {
-	hintPath := s.Path + hintExt
-	return writeHintFile(hintPath, s.KeyDir)
 }
