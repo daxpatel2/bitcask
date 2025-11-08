@@ -15,7 +15,7 @@ type Store struct {
 	KeyDir map[string]Entry
 	File   *os.File
 	Path   string
-	Mutex  sync.Mutex
+	Mutex  sync.RWMutex
 }
 
 type Entry struct {
@@ -24,16 +24,13 @@ type Entry struct {
 }
 
 const HEADERSIZE = 8
+const hintExt = ".hint"
+const hintTmpExt = ".tmp"
+
+var ErrKeyNotFound = errors.New("key not found")
+var ErrFileNotOpen = errors.New("file not open")
 
 func (s *Store) Put(key string, value string) error {
-	s.Mutex.Lock()
-	defer s.Mutex.Unlock() // this will unlock mutexes when function returns if we dont do mutex unlock after returns
-
-	offset, err := s.File.Seek(0, io.SeekEnd)
-	if err != nil {
-		return fmt.Errorf("failed to seek EOF: %w", err)
-	}
-
 	/**
 
 	We need to store key len , value len and key value on the file because if the program crashes or restarts we have no
@@ -52,6 +49,12 @@ func (s *Store) Put(key string, value string) error {
 	// if the value is empty ->"", this is an indication of a tombstone
 	// we need to remove this value from memory
 
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock() // this will unlock mutexes when function returns if we don't do mutex unlock a
+	offset, err := s.File.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("failed to seek EOF: %w", err)
+	}
 	//write only keyLen,valLen, key, and 0 to file
 	// create the buffer for keylen and valuelen in binary format firs
 	if err := binary.Write(buf, binary.LittleEndian, keyLen); err != nil {
@@ -81,11 +84,13 @@ func (s *Store) Put(key string, value string) error {
 
 	if valLen != 0 {
 		entry := Entry{
-			Size:   int64(len(value)),            // how much the actual value is (we can simply just read this much instantly
-			Offset: offset + 8 + int64(len(key)), // offset (beggining of our header) + 8 bytes (keylen + valuelen) + len(key) (since we also write the key)
+			Size:   int64(len(value)),                     // how much the actual value is (we can simply just read this much instantly
+			Offset: offset + HEADERSIZE + int64(len(key)), // offset (beggining of our header) + 8 bytes (keylen + valuelen) + len(key) (since we also write the key)
 			// we can start reading straight from the value part and skip parsing the header again
 		}
 		s.KeyDir[key] = entry
+	} else {
+		delete(s.KeyDir, key)
 	}
 
 	return nil
@@ -105,16 +110,34 @@ func Open(path string) (*Store, error) {
 	// check if this was an empty file
 	inf, err := os.Stat(path)
 	if err != nil {
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to stat file %s: %w", path, err)
-	} else {
-		if inf.Size() == 0 {
-			store := &Store{
-				File:   file,
-				KeyDir: make(map[string]Entry),
-				Path:   path,
+	}
+
+	// check if hint exists, if yes than load everything into memory
+	hintPath := path + hintExt
+	if hintInfo, err := os.Stat(hintPath); err == nil {
+		// use hint if its newer than datafile
+		if !hintInfo.ModTime().Before(inf.ModTime()) {
+			if kd, err := loadHintFile(hintPath); err == nil {
+				return &Store{
+					KeyDir: kd,
+					File:   file,
+					Path:   path,
+				}, nil
 			}
-			return store, nil
 		}
+	}
+
+	// if the datafile is empty (potentially new instance etc...)
+	// then there is no keydir to return
+	// just return a store
+	if inf.Size() == 0 {
+		return &Store{
+			File:   file,
+			KeyDir: make(map[string]Entry),
+			Path:   path,
+		}, nil
 	}
 
 	// we will need to rebuild the map dir from the contents of the file, if it's not empty
@@ -123,7 +146,7 @@ func Open(path string) (*Store, error) {
 	var offset int64 = 0
 
 	for {
-		header := make([]byte, 8)
+		header := make([]byte, HEADERSIZE)
 		n, err := file.ReadAt(header, offset)
 		if err == io.EOF || n == 0 {
 			break // reached end of file
@@ -141,7 +164,7 @@ func Open(path string) (*Store, error) {
 		// create a buffer to read key
 		keyBuf := make([]byte, keyLen)
 		// Step 3: read key
-		_, err = file.ReadAt(keyBuf, offset+8)
+		_, err = file.ReadAt(keyBuf, offset+HEADERSIZE)
 		if err != nil {
 			return nil, fmt.Errorf("read key: %w", err)
 		}
@@ -150,24 +173,26 @@ func Open(path string) (*Store, error) {
 			// encountered a tombstone
 			delete(keyDir, string(keyBuf)) // tombstone → remove key
 		} else {
-			keyDir[string(keyBuf)] = Entry{offset + 8 + int64(keyLen), int64(valueLen)}
+			keyDir[string(keyBuf)] = Entry{offset + HEADERSIZE + int64(keyLen), int64(valueLen)}
 		}
-		offset += 8 + int64(keyLen) + int64(valueLen)
+		offset += HEADERSIZE + int64(keyLen) + int64(valueLen)
 
 	}
 
-	store := &Store{
+	return &Store{
 		File:   file,
 		KeyDir: keyDir,
 		Path:   path,
-	}
-
-	return store, nil
+	}, nil
 }
 
 func (s *Store) Close() error {
 	if s.File != nil {
 		s.Mutex.Lock()
+		defer s.Mutex.Unlock()
+
+		_ = s.writeHintLocked()
+
 		if err := s.File.Close(); err != nil {
 			s.Mutex.Unlock()
 			return fmt.Errorf("failed to close file: %w", err)
@@ -178,20 +203,18 @@ func (s *Store) Close() error {
 		s.KeyDir = nil
 		s.File = nil
 		s.Path = ""
-		s.Mutex.Unlock()
 	}
 
 	return nil
 }
-
-var ErrKeyNotFound = errors.New("key not found")
-var ErrFileNotOpen = errors.New("file not open")
 
 func (s *Store) Get(key string) ([]byte, error) {
 	if s.File == nil {
 		return nil, ErrFileNotOpen
 	}
 
+	s.Mutex.RLock()
+	defer s.Mutex.RUnlock()
 	entry, ok := s.KeyDir[key]
 	if !ok {
 		return nil, ErrKeyNotFound
@@ -321,5 +344,116 @@ func (s *Store) Compact() error {
 	s.File = f
 	s.KeyDir = newKeyDir
 
+	if err := s.writeHintLocked(); err != nil {
+		//nothing
+	}
+
 	return nil
+}
+
+// Format per record: [u32 keyLen][i64 offset][i64 size][keyBytes]
+func writeHintFile(hintPath string, keyDir map[string]Entry) error {
+
+	tmp := hintPath + hintTmpExt
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open hint file: %w", err)
+	}
+
+	for k, e := range keyDir {
+		buf := new(bytes.Buffer)
+		keyBytes := []byte(k)
+		keyLen := uint32(len(keyBytes))
+
+		if err := binary.Write(buf, binary.LittleEndian, keyLen); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("write keyLen: %w", err)
+		}
+		if err := binary.Write(buf, binary.LittleEndian, e.Offset); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("write valLen: %w", err)
+		}
+		if err := binary.Write(buf, binary.LittleEndian, e.Size); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("write key bytes: %w", err)
+		}
+		if _, err := buf.Write(keyBytes); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("write key bytes: %w", err)
+		}
+
+		if _, err := f.Write(buf.Bytes()); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("write value bytes: %w", err)
+		}
+	}
+
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("final sync compact file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close compact file: %w", err)
+	}
+
+	if err := os.Rename(tmp, hintPath); err != nil {
+		return fmt.Errorf("rename compact file: %w", err)
+	}
+
+	return nil
+}
+
+// loadHintFile reads a hint file into a fresh KeyDir map.
+func loadHintFile(hintPath string) (map[string]Entry, error) {
+	f, err := os.Open(hintPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	keyDir := make(map[string]Entry)
+	for {
+		var keyLen uint32
+		if err := binary.Read(f, binary.LittleEndian, &keyLen); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("read keyLen: %w", err)
+		}
+		var off int64
+		if err := binary.Read(f, binary.LittleEndian, &off); err != nil {
+			return nil, fmt.Errorf("read offset: %w", err)
+		}
+		var sz int64
+		if err := binary.Read(f, binary.LittleEndian, &sz); err != nil {
+			return nil, fmt.Errorf("read size: %w", err)
+		}
+
+		kb := make([]byte, keyLen)
+		if _, err := io.ReadFull(f, kb); err != nil {
+			return nil, fmt.Errorf("read key bytes: %w", err)
+		}
+		keyDir[string(kb)] = Entry{Offset: off, Size: sz}
+	}
+	return keyDir, nil
+}
+
+// WriteHint writes the current KeyDir to <data>.hint under a read lock
+// so writers are paused and the snapshot is consistent.
+func (s *Store) WriteHint() error {
+	hintPath := s.Path + hintExt
+
+	s.Mutex.RLock()
+	defer s.Mutex.RUnlock()
+
+	if s.File == nil {
+		return ErrFileNotOpen
+	}
+	return writeHintFile(hintPath, s.KeyDir)
+}
+
+// writeHintLocked writes a hint while the caller already holds s.Mutex (write lock).
+func (s *Store) writeHintLocked() error {
+	hintPath := s.Path + hintExt
+	return writeHintFile(hintPath, s.KeyDir)
 }

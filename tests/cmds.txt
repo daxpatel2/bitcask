@@ -1,0 +1,11 @@
+# 1) Benchmark startup time with no hint (force scan)
+go run ./cmd/bitcaskctl -data ./data/bitcask.data -startupOnly -forceScan
+
+# 2) Create a hint and exit
+go run ./cmd/bitcaskctl -data ./data/bitcask.data -startupOnly -writeHint
+
+# 3) Benchmark startup time with hint available
+go run ./cmd/bitcaskctl -data ./data/bitcask.data -startupOnly
+
+# 4) Full load test but also write a fresh hint on exit
+go run ./cmd/bitcaskctl -data ./data/bitcask.data -duration 20s -concurrency 16 -writeHint

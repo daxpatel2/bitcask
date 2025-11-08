@@ -1,0 +1,27 @@
+[1.0s] ops=881 (881 ops/s) puts=210 gets=634 dels=37 errs=0 written=52.50 KiB read=35.75 KiB
+[2.0s] ops=1722 (841 ops/s) puts=413 gets=1227 dels=83 errs=0 written=103.25 KiB read=72.00 KiB
+[3.0s] ops=2611 (889 ops/s) puts=616 gets=1866 dels=129 errs=0 written=154.00 KiB read=114.50 KiB
+[4.0s] ops=3508 (897 ops/s) puts=826 gets=2513 dels=169 errs=0 written=206.50 KiB read=151.25 KiB
+[5.0s] ops=4340 (832 ops/s) puts=1029 gets=3097 dels=214 errs=0 written=257.25 KiB read=187.50 KiB
+[6.0s] ops=5130 (790 ops/s) puts=1233 gets=3646 dels=251 errs=0 written=308.25 KiB read=219.25 KiB
+[7.0s] ops=5945 (815 ops/s) puts=1435 gets=4215 dels=295 errs=0 written=358.75 KiB read=257.75 KiB
+[8.0s] ops=6807 (862 ops/s) puts=1638 gets=4831 dels=338 errs=0 written=409.50 KiB read=300.00 KiB
+[9.0s] ops=7579 (772 ops/s) puts=1849 gets=5359 dels=371 errs=0 written=462.25 KiB read=331.75 KiB
+[10.0s] ops=8341 (762 ops/s) puts=2065 gets=5876 dels=400 errs=0 written=516.25 KiB read=360.25 KiB
+[11.0s] ops=9096 (755 ops/s) puts=2267 gets=6383 dels=446 errs=0 written=566.75 KiB read=393.75 KiB
+[12.0s] ops=9832 (736 ops/s) puts=2471 gets=6871 dels=490 errs=0 written=617.75 KiB read=431.75 KiB
+[13.0s] ops=10695 (863 ops/s) puts=2693 gets=7485 dels=517 errs=0 written=673.25 KiB read=473.50 KiB
+[14.0s] ops=11544 (849 ops/s) puts=2900 gets=8089 dels=555 errs=0 written=725.00 KiB read=519.25 KiB
+[15.0s] ops=12358 (814 ops/s) puts=3117 gets=8653 dels=588 errs=0 written=779.25 KiB read=561.75 KiB
+--------- summary ---------
+duration:         15.085s
+total ops:        12366  (820 ops/s)
+puts/gets/dels:   3125 / 8653 / 588
+errors:           0
+latency avg:      9.710541ms
+latency p50/p95/p99: 2.333µs / 32.880709ms / 34.5625ms
+bytes written:    781.25 KiB
+bytes read:       561.75 KiB
+file size:        8.05 MiB
+
+cmd: go run ./cmd/bitcaskctl -duration 15s -cpuprofile cpu.pprof -memprofile mem.pprof

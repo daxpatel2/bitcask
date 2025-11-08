@@ -1,0 +1,22 @@
+[1.0s] ops=858 (858 ops/s) puts=195 gets=611 dels=52 errs=0 written=48.75 KiB read=34.50 KiB
+[2.0s] ops=1698 (840 ops/s) puts=402 gets=1204 dels=92 errs=0 written=100.50 KiB read=69.50 KiB
+[3.0s] ops=2493 (795 ops/s) puts=601 gets=1755 dels=137 errs=0 written=150.25 KiB read=97.75 KiB
+[4.0s] ops=3371 (878 ops/s) puts=812 gets=2383 dels=176 errs=0 written=203.00 KiB read=130.75 KiB
+[5.0s] ops=4210 (839 ops/s) puts=1010 gets=2973 dels=227 errs=0 written=252.50 KiB read=169.25 KiB
+[6.0s] ops=4990 (780 ops/s) puts=1213 gets=3503 dels=274 errs=0 written=303.25 KiB read=200.75 KiB
+[7.0s] ops=5730 (740 ops/s) puts=1422 gets=3995 dels=313 errs=0 written=355.50 KiB read=240.00 KiB
+[8.0s] ops=6523 (793 ops/s) puts=1638 gets=4540 dels=345 errs=0 written=409.50 KiB read=275.00 KiB
+[9.0s] ops=7331 (808 ops/s) puts=1843 gets=5103 dels=385 errs=0 written=460.75 KiB read=306.50 KiB
+[10.0s] ops=8164 (833 ops/s) puts=2041 gets=5688 dels=435 errs=0 written=510.25 KiB read=344.25 KiB
+--------- summary ---------
+duration:         10.084s
+total ops:        8172  (810 ops/s)
+puts/gets/dels:   2049 / 5688 / 435
+errors:           0
+latency avg:      9.802116ms
+latency p50/p95/p99: 1.875µs / 32.231375ms / 34.338458ms
+bytes written:    512.25 KiB
+bytes read:       344.25 KiB
+file size:        7.22 MiB
+
+CMD: go run ./cmd/bitcaskctl/main.go -data ./data/bitcask.data -duration 10s -concurrency 8 -read 70 -write 25 -del 5 -valueSize 256

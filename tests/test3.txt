@@ -1,0 +1,108 @@
+[1.0s] ops=832 (832 ops/s) puts=199 gets=585 dels=48 errs=0 written=49.75 KiB read=65.00 KiB
+[2.0s] ops=1667 (835 ops/s) puts=402 gets=1171 dels=94 errs=0 written=100.50 KiB read=131.00 KiB
+[3.0s] ops=2382 (715 ops/s) puts=607 gets=1640 dels=135 errs=0 written=151.75 KiB read=181.00 KiB
+[4.0s] ops=3150 (768 ops/s) puts=795 gets=2178 dels=177 errs=0 written=198.75 KiB read=241.75 KiB
+[5.0s] ops=3725 (575 ops/s) puts=954 gets=2566 dels=205 errs=0 written=238.50 KiB read=285.25 KiB
+[6.0s] ops=4468 (743 ops/s) puts=1115 gets=3105 dels=248 errs=0 written=278.75 KiB read=345.00 KiB
+[7.0s] ops=5259 (791 ops/s) puts=1309 gets=3666 dels=284 errs=0 written=327.25 KiB read=408.75 KiB
+[8.0s] ops=6167 (908 ops/s) puts=1513 gets=4329 dels=325 errs=0 written=378.25 KiB read=483.00 KiB
+[9.0s] ops=7024 (857 ops/s) puts=1706 gets=4947 dels=371 errs=0 written=426.50 KiB read=551.75 KiB
+[10.0s] ops=7822 (798 ops/s) puts=1908 gets=5497 dels=417 errs=0 written=477.00 KiB read=611.25 KiB
+[11.0s] ops=8695 (873 ops/s) puts=2108 gets=6121 dels=466 errs=0 written=527.00 KiB read=686.25 KiB
+[12.0s] ops=9429 (734 ops/s) puts=2316 gets=6607 dels=506 errs=0 written=579.00 KiB read=743.00 KiB
+[13.0s] ops=10271 (842 ops/s) puts=2539 gets=7199 dels=533 errs=0 written=634.75 KiB read=812.75 KiB
+[14.0s] ops=11180 (909 ops/s) puts=2746 gets=7861 dels=573 errs=0 written=686.50 KiB read=888.50 KiB
+[15.0s] ops=11970 (790 ops/s) puts=2959 gets=8401 dels=610 errs=0 written=739.75 KiB read=952.25 KiB
+[16.0s] ops=12784 (814 ops/s) puts=3168 gets=8972 dels=644 errs=0 written=792.00 KiB read=1022.50 KiB
+[17.0s] ops=13565 (781 ops/s) puts=3370 gets=9506 dels=689 errs=0 written=842.50 KiB read=1.06 MiB
+[18.0s] ops=14257 (692 ops/s) puts=3572 gets=9954 dels=731 errs=0 written=893.00 KiB read=1.12 MiB
+[19.0s] ops=15012 (755 ops/s) puts=3777 gets=10463 dels=772 errs=0 written=944.25 KiB read=1.18 MiB
+[20.0s] ops=15885 (873 ops/s) puts=3987 gets=11090 dels=808 errs=0 written=996.75 KiB read=1.26 MiB
+[21.0s] ops=16802 (917 ops/s) puts=4194 gets=11757 dels=851 errs=0 written=1.02 MiB read=1.34 MiB
+[22.0s] ops=17552 (750 ops/s) puts=4409 gets=12258 dels=885 errs=0 written=1.08 MiB read=1.40 MiB
+[23.0s] ops=18334 (782 ops/s) puts=4617 gets=12791 dels=926 errs=0 written=1.13 MiB read=1.47 MiB
+[24.0s] ops=19202 (868 ops/s) puts=4822 gets=13410 dels=970 errs=0 written=1.18 MiB read=1.54 MiB
+[25.0s] ops=19975 (773 ops/s) puts=5032 gets=13934 dels=1009 errs=0 written=1.23 MiB read=1.61 MiB
+[26.0s] ops=20813 (838 ops/s) puts=5238 gets=14523 dels=1052 errs=0 written=1.28 MiB read=1.68 MiB
+[27.0s] ops=21573 (760 ops/s) puts=5447 gets=15040 dels=1086 errs=0 written=1.33 MiB read=1.74 MiB
+[28.0s] ops=22380 (807 ops/s) puts=5658 gets=15603 dels=1119 errs=0 written=1.38 MiB read=1.81 MiB
+[29.0s] ops=23202 (822 ops/s) puts=5864 gets=16192 dels=1146 errs=0 written=1.43 MiB read=1.89 MiB
+[30.0s] ops=24049 (847 ops/s) puts=6064 gets=16798 dels=1187 errs=0 written=1.48 MiB read=1.96 MiB
+[31.0s] ops=24901 (852 ops/s) puts=6265 gets=17406 dels=1230 errs=0 written=1.53 MiB read=2.04 MiB
+[32.0s] ops=25737 (836 ops/s) puts=6476 gets=17993 dels=1268 errs=0 written=1.58 MiB read=2.12 MiB
+[33.0s] ops=26572 (835 ops/s) puts=6687 gets=18580 dels=1305 errs=0 written=1.63 MiB read=2.20 MiB
+[34.0s] ops=27406 (834 ops/s) puts=6885 gets=19167 dels=1354 errs=0 written=1.68 MiB read=2.27 MiB
+[35.0s] ops=28256 (850 ops/s) puts=7100 gets=19769 dels=1387 errs=0 written=1.73 MiB read=2.35 MiB
+[36.0s] ops=29101 (845 ops/s) puts=7303 gets=20365 dels=1433 errs=0 written=1.78 MiB read=2.42 MiB
+[37.0s] ops=29971 (870 ops/s) puts=7516 gets=20985 dels=1470 errs=0 written=1.83 MiB read=2.51 MiB
+[38.0s] ops=30789 (818 ops/s) puts=7718 gets=21561 dels=1510 errs=0 written=1.88 MiB read=2.58 MiB
+[39.0s] ops=31621 (832 ops/s) puts=7910 gets=22151 dels=1560 errs=0 written=1.93 MiB read=2.66 MiB
+[40.0s] ops=32449 (828 ops/s) puts=8119 gets=22731 dels=1599 errs=0 written=1.98 MiB read=2.73 MiB
+[41.0s] ops=33214 (765 ops/s) puts=8321 gets=23250 dels=1643 errs=0 written=2.03 MiB read=2.80 MiB
+[42.0s] ops=34042 (828 ops/s) puts=8521 gets=23829 dels=1692 errs=0 written=2.08 MiB read=2.88 MiB
+[43.0s] ops=34890 (848 ops/s) puts=8733 gets=24430 dels=1727 errs=0 written=2.13 MiB read=2.96 MiB
+[44.0s] ops=35747 (857 ops/s) puts=8935 gets=25048 dels=1764 errs=0 written=2.18 MiB read=3.04 MiB
+[45.0s] ops=36505 (758 ops/s) puts=9145 gets=25563 dels=1797 errs=0 written=2.23 MiB read=3.11 MiB
+[46.0s] ops=37263 (758 ops/s) puts=9337 gets=26086 dels=1840 errs=0 written=2.28 MiB read=3.18 MiB
+[47.0s] ops=38005 (742 ops/s) puts=9537 gets=26588 dels=1880 errs=0 written=2.33 MiB read=3.25 MiB
+[48.0s] ops=38825 (820 ops/s) puts=9743 gets=27173 dels=1909 errs=0 written=2.38 MiB read=3.33 MiB
+[49.0s] ops=39624 (799 ops/s) puts=9929 gets=27743 dels=1952 errs=0 written=2.42 MiB read=3.41 MiB
+[50.0s] ops=40439 (815 ops/s) puts=10114 gets=28317 dels=2008 errs=0 written=2.47 MiB read=3.50 MiB
+[51.0s] ops=41283 (844 ops/s) puts=10314 gets=28917 dels=2052 errs=0 written=2.52 MiB read=3.58 MiB
+[52.0s] ops=42081 (798 ops/s) puts=10503 gets=29479 dels=2099 errs=0 written=2.56 MiB read=3.66 MiB
+[53.0s] ops=42898 (817 ops/s) puts=10703 gets=30059 dels=2136 errs=0 written=2.61 MiB read=3.74 MiB
+[54.0s] ops=43696 (798 ops/s) puts=10904 gets=30614 dels=2178 errs=0 written=2.66 MiB read=3.82 MiB
+[55.0s] ops=44486 (790 ops/s) puts=11101 gets=31160 dels=2225 errs=0 written=2.71 MiB read=3.89 MiB
+[56.0s] ops=45290 (804 ops/s) puts=11311 gets=31719 dels=2260 errs=0 written=2.76 MiB read=3.97 MiB
+[57.0s] ops=46139 (849 ops/s) puts=11517 gets=32320 dels=2302 errs=0 written=2.81 MiB read=4.06 MiB
+[58.0s] ops=47013 (874 ops/s) puts=11718 gets=32946 dels=2349 errs=0 written=2.86 MiB read=4.15 MiB
+[59.0s] ops=47886 (873 ops/s) puts=11927 gets=33570 dels=2389 errs=0 written=2.91 MiB read=4.23 MiB
+[60.0s] ops=48676 (790 ops/s) puts=12131 gets=34112 dels=2433 errs=0 written=2.96 MiB read=4.31 MiB
+[61.0s] ops=49452 (776 ops/s) puts=12333 gets=34641 dels=2478 errs=0 written=3.01 MiB read=4.39 MiB
+[62.0s] ops=50231 (779 ops/s) puts=12535 gets=35173 dels=2523 errs=0 written=3.06 MiB read=4.46 MiB
+[63.0s] ops=51053 (822 ops/s) puts=12746 gets=35750 dels=2557 errs=0 written=3.11 MiB read=4.54 MiB
+[64.0s] ops=51940 (887 ops/s) puts=12948 gets=36389 dels=2603 errs=0 written=3.16 MiB read=4.64 MiB
+[65.0s] ops=52735 (795 ops/s) puts=13156 gets=36936 dels=2643 errs=0 written=3.21 MiB read=4.72 MiB
+[66.0s] ops=53599 (864 ops/s) puts=13366 gets=37551 dels=2682 errs=0 written=3.26 MiB read=4.81 MiB
+[67.0s] ops=54408 (809 ops/s) puts=13579 gets=38111 dels=2718 errs=0 written=3.32 MiB read=4.89 MiB
+[68.0s] ops=55242 (834 ops/s) puts=13799 gets=38699 dels=2744 errs=0 written=3.37 MiB read=4.98 MiB
+[69.0s] ops=56093 (851 ops/s) puts=14003 gets=39304 dels=2786 errs=0 written=3.42 MiB read=5.07 MiB
+[70.0s] ops=56894 (801 ops/s) puts=14201 gets=39858 dels=2835 errs=0 written=3.47 MiB read=5.15 MiB
+[71.0s] ops=57717 (823 ops/s) puts=14399 gets=40432 dels=2886 errs=0 written=3.52 MiB read=5.24 MiB
+[72.0s] ops=58560 (843 ops/s) puts=14607 gets=41025 dels=2928 errs=0 written=3.57 MiB read=5.33 MiB
+[73.0s] ops=59424 (864 ops/s) puts=14813 gets=41640 dels=2971 errs=0 written=3.62 MiB read=5.42 MiB
+[74.0s] ops=60189 (765 ops/s) puts=15013 gets=42159 dels=3017 errs=0 written=3.67 MiB read=5.50 MiB
+[75.0s] ops=61104 (915 ops/s) puts=15220 gets=42830 dels=3054 errs=0 written=3.72 MiB read=5.60 MiB
+[76.0s] ops=61956 (852 ops/s) puts=15417 gets=43435 dels=3104 errs=0 written=3.76 MiB read=5.69 MiB
+[77.0s] ops=62741 (785 ops/s) puts=15606 gets=43983 dels=3152 errs=0 written=3.81 MiB read=5.77 MiB
+[78.0s] ops=63438 (697 ops/s) puts=15792 gets=44461 dels=3185 errs=0 written=3.86 MiB read=5.85 MiB
+[79.0s] ops=64187 (749 ops/s) puts=15996 gets=44964 dels=3227 errs=0 written=3.91 MiB read=5.92 MiB
+[80.0s] ops=64963 (776 ops/s) puts=16200 gets=45494 dels=3269 errs=0 written=3.96 MiB read=6.00 MiB
+[81.0s] ops=65775 (812 ops/s) puts=16413 gets=46057 dels=3305 errs=0 written=4.01 MiB read=6.09 MiB
+[82.0s] ops=66619 (844 ops/s) puts=16607 gets=46657 dels=3355 errs=0 written=4.05 MiB read=6.18 MiB
+[83.0s] ops=67381 (762 ops/s) puts=16817 gets=47172 dels=3392 errs=0 written=4.11 MiB read=6.26 MiB
+[84.0s] ops=68227 (846 ops/s) puts=17027 gets=47770 dels=3430 errs=0 written=4.16 MiB read=6.35 MiB
+[85.0s] ops=69033 (806 ops/s) puts=17240 gets=48329 dels=3464 errs=0 written=4.21 MiB read=6.44 MiB
+[86.0s] ops=69909 (876 ops/s) puts=17437 gets=48957 dels=3515 errs=0 written=4.26 MiB read=6.54 MiB
+[87.0s] ops=70707 (798 ops/s) puts=17641 gets=49509 dels=3557 errs=0 written=4.31 MiB read=6.62 MiB
+[88.0s] ops=71512 (805 ops/s) puts=17844 gets=50066 dels=3602 errs=0 written=4.36 MiB read=6.71 MiB
+[89.0s] ops=72347 (835 ops/s) puts=18036 gets=50656 dels=3655 errs=0 written=4.40 MiB read=6.80 MiB
+[90.0s] ops=73135 (788 ops/s) puts=18238 gets=51195 dels=3702 errs=0 written=4.45 MiB read=6.89 MiB
+[91.0s] ops=73964 (829 ops/s) puts=18452 gets=51774 dels=3738 errs=0 written=4.50 MiB read=6.99 MiB
+[92.0s] ops=74740 (776 ops/s) puts=18664 gets=52302 dels=3774 errs=0 written=4.56 MiB read=7.07 MiB
+[93.0s] ops=75568 (828 ops/s) puts=18876 gets=52881 dels=3811 errs=0 written=4.61 MiB read=7.16 MiB
+[94.0s] ops=76413 (845 ops/s) puts=19084 gets=53477 dels=3852 errs=0 written=4.66 MiB read=7.26 MiB
+[95.0s] ops=77214 (801 ops/s) puts=19294 gets=54031 dels=3889 errs=0 written=4.71 MiB read=7.34 MiB
+[96.0s] ops=78108 (894 ops/s) puts=19489 gets=54676 dels=3943 errs=0 written=4.76 MiB read=7.45 MiB
+[97.0s] ops=78911 (803 ops/s) puts=19704 gets=55230 dels=3977 errs=0 written=4.81 MiB read=7.54 MiB
+[98.0s] ops=79678 (767 ops/s) puts=19900 gets=55753 dels=4025 errs=0 written=4.86 MiB read=7.62 MiB
+--------- summary ---------
+duration:         1m38.43s
+total ops:        80000  (813 ops/s)
+puts/gets/dels:   19970 / 55992 / 4038
+errors:           0
+latency avg:      4.901914ms
+latency p50/p95/p99: 10.583µs / 16.660292ms / 18.944333ms
+bytes written:    4.88 MiB
+bytes read:       7.67 MiB
+file size:        13.36 MiB
