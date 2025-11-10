@@ -115,21 +115,17 @@ func loadHintFile(hintPath string) (map[string]Entry, error) {
 // WriteHint writes the current DataMap to <data>.hint under a read lock
 // so writers are paused and the snapshot is consistent.
 func (s *FileStore) WriteHint() error {
-	hint := hintPath(s.Path)
-
 	s.RWMux.RLock()
 	defer s.RWMux.RUnlock()
-
-	if s.Files[s.ActiveSegID] == nil {
+	if len(s.Files) == 0 {
 		return ErrFileNotOpen
 	}
-	return writeHintFile(hint, s.DataMap)
+	return writeHintFile(hintPath(s.Path), s.DataMap)
 }
 
 // writeHintLocked writes a hint while the caller already holds s.RWMux (write lock).
 func (s *FileStore) writeHintLocked() error {
-	hintPath := hintPath(s.Path)
-	return writeHintFile(hintPath, s.DataMap)
+	return writeHintFile(hintPath(s.Path), s.DataMap)
 }
 
 func scanDir(dir string) ([]os.DirEntry, error) {
@@ -139,7 +135,7 @@ func scanDir(dir string) ([]os.DirEntry, error) {
 		return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	// Discover segment files: 000001.data, 000002.data, ...
+	// Discover all files: 000001.data, 000002.data, ...
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory %s: %w", dir, err)
@@ -193,4 +189,75 @@ func latestSegmentMTime(dir string, segIDs []int) (time.Time, error) {
 		}
 	}
 	return latest, nil
+}
+
+// scanSegment rebuilds keyDir entries from a single segment file.
+func scanSegment(segID int, f *os.File, keyDir map[string]Entry) error {
+	var off int64 = 0
+	hdr := make([]byte, headerSize)
+
+	for {
+		n, err := f.ReadAt(hdr, off)
+		if err == io.EOF && n == 0 {
+			break // clean end
+		}
+		if err != nil && err != io.EOF {
+			return fmt.Errorf("read header seg %06d off %d: %w", segID, off, err)
+		}
+		if n < headerSize {
+			// Incomplete tail → stop at last good boundary.
+			break
+		}
+
+		keyLen := binary.LittleEndian.Uint32(hdr[0:4])
+		valLen := binary.LittleEndian.Uint32(hdr[4:8])
+
+		// If you disallow empty keys, this can be treated as a format error.
+		if keyLen == 0 {
+			break
+		}
+
+		kb := make([]byte, keyLen)
+		if _, err := f.ReadAt(kb, off+int64(headerSize)); err != nil {
+			return fmt.Errorf("read key seg %06d off %d: %w", segID, off, err)
+		}
+
+		if valLen == 0 {
+			delete(keyDir, string(kb)) // tombstone
+		} else {
+			valOff := off + int64(headerSize) + int64(keyLen)
+			keyDir[string(kb)] = Entry{
+				SegID:  segID,
+				Offset: valOff,
+				Size:   int64(valLen),
+			}
+		}
+
+		off += int64(headerSize) + int64(keyLen) + int64(valLen)
+	}
+	return nil
+}
+
+func deleteOrphanFiles(dir string) error {
+	ents, err := scanDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	for _, ent := range ents {
+		// filter out non files
+		if ent.IsDir() {
+			continue
+		}
+		name := ent.Name()
+		// filter out non .compact files
+		if !strings.HasSuffix(name, compactExt) {
+			continue
+		}
+		if err := os.Remove(name); err != nil {
+			return fmt.Errorf("remove file %s: %w", name, err)
+		}
+		fmt.Printf("removed file %s\n", name)
+	}
+	return nil
 }
