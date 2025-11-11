@@ -1,0 +1,7 @@
+./compact.go
+./constants.go
+./errors.go
+./helpers.go
+./models.go
+./segments.go
+./store.go

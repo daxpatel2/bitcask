@@ -117,7 +117,7 @@ func Open(dir string) (*FileStore, error) {
 	active := segIds[len(segIds)-1]
 
 	// check for Hint File and load DataMap from there, otherwise fallback to scanning
-	hp := hintPath(dir)
+	hp := HintPath(dir)
 	if hi, err := os.Stat(hp); err == nil {
 		if newest, err := latestSegmentMTime(dir, segIds); err == nil && !hi.ModTime().Before(newest) {
 			if kd, err := loadHintFile(hp); err == nil {

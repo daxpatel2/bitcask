@@ -120,12 +120,12 @@ func (fs *FileStore) WriteHint() error {
 	if len(fs.Files) == 0 {
 		return ErrFileNotOpen
 	}
-	return writeHintFile(hintPath(fs.Path), fs.DataMap)
+	return writeHintFile(HintPath(fs.Path), fs.DataMap)
 }
 
 // writeHintLocked writes a hint while the caller already holds s.RWMux (write lock).
 func (fs *FileStore) writeHintLocked() error {
-	return writeHintFile(hintPath(fs.Path), fs.DataMap)
+	return writeHintFile(HintPath(fs.Path), fs.DataMap)
 }
 
 func scanDir(dir string) ([]os.DirEntry, error) {
@@ -172,7 +172,7 @@ func filterSegmentFiles(dir string) []int {
 	return segIds
 }
 
-func hintPath(dir string) string {
+func HintPath(dir string) string {
 	return filepath.Join(dir, hintFileName)
 }
 
