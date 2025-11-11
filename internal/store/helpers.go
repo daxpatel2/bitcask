@@ -13,7 +13,16 @@ import (
 	"time"
 )
 
-// Format per record: [u32 keyLen][i64 offset][i64 size][keyBytes]
+// writeHintFile creates a new hint file from the provided in-memory index (keyDir).
+// The hint file is used to speed up the startup process by avoiding a full scan of all segment files.
+// The format for each record in the hint file is: [keyLen u32][segID i32][offset i64][size i64][key bytes].
+//
+// Parameters:
+//   hintPath: The full path where the hint file should be written.
+//   keyDir: The map containing the in-memory index to be written to the hint file.
+//
+// Returns:
+//   An error if any file operations fail, otherwise nil.
 func writeHintFile(hintPath string, keyDir map[string]Entry) error {
 
 	// create or open the global hint file if it doesn't exist
@@ -73,7 +82,14 @@ func writeHintFile(hintPath string, keyDir map[string]Entry) error {
 	return nil
 }
 
-// loadHintFile reads a hint file into a fresh DataMap map.
+// loadHintFile reads a hint file and reconstructs the in-memory index (DataMap).
+// This allows for a much faster startup as it avoids scanning all segment files.
+//
+// Parameters:
+//   hintPath: The path to the hint file.
+//
+// Returns:
+//   A map representing the in-memory index and an error if the file cannot be read.
 func loadHintFile(hintPath string) (map[string]Entry, error) {
 	f, err := os.Open(hintPath)
 	if err != nil {
@@ -112,8 +128,11 @@ func loadHintFile(hintPath string) (map[string]Entry, error) {
 	return keyDir, nil
 }
 
-// WriteHint writes the current DataMap to <data>.hint under a read lock
-// so writers are paused and the snapshot is consistent.
+// WriteHint writes the current in-memory index (DataMap) to a hint file.
+// It acquires a read lock to ensure a consistent snapshot of the DataMap.
+//
+// Returns:
+//   An error if the store has no open files or if the hint file write fails.
 func (fs *FileStore) WriteHint() error {
 	fs.RWMux.RLock()
 	defer fs.RWMux.RUnlock()
@@ -123,11 +142,20 @@ func (fs *FileStore) WriteHint() error {
 	return writeHintFile(HintPath(fs.Path), fs.DataMap)
 }
 
-// writeHintLocked writes a hint while the caller already holds s.RWMux (write lock).
+// writeHintLocked is an internal helper that writes a hint file
+// while the caller already holds a write lock on the FileStore.
 func (fs *FileStore) writeHintLocked() error {
 	return writeHintFile(HintPath(fs.Path), fs.DataMap)
 }
 
+// scanDir reads the contents of a directory.
+// It creates the directory if it does not exist.
+//
+// Parameters:
+//   dir: The path to the directory.
+//
+// Returns:
+//   A slice of directory entries and an error if the directory cannot be read.
 func scanDir(dir string) ([]os.DirEntry, error) {
 	// ensure the directory exits
 	// creates it if it doesn't
@@ -144,6 +172,14 @@ func scanDir(dir string) ([]os.DirEntry, error) {
 	return ents, nil
 }
 
+// filterSegmentFiles scans a directory for segment files (e.g., "000001.data")
+// and returns a sorted slice of their integer IDs.
+//
+// Parameters:
+//   dir: The directory to scan.
+//
+// Returns:
+//   A sorted slice of segment IDs.
 func filterSegmentFiles(dir string) []int {
 	ents, err := scanDir(dir)
 	if err != nil {
@@ -172,10 +208,19 @@ func filterSegmentFiles(dir string) []int {
 	return segIds
 }
 
+// HintPath returns the full path to the hint file for a given directory.
 func HintPath(dir string) string {
 	return filepath.Join(dir, hintFileName)
 }
 
+// latestSegmentMTime finds the modification time of the most recently changed segment file.
+//
+// Parameters:
+//   dir: The directory containing the segment files.
+//   segIDs: A slice of segment IDs to check.
+//
+// Returns:
+//   The latest modification time and an error if any file's status cannot be read.
 func latestSegmentMTime(dir string, segIDs []int) (time.Time, error) {
 	var latest time.Time
 	for _, id := range segIDs {
@@ -191,7 +236,16 @@ func latestSegmentMTime(dir string, segIDs []int) (time.Time, error) {
 	return latest, nil
 }
 
-// scanSegment rebuilds keyDir entries from a single segment file.
+// scanSegment rebuilds the in-memory index (keyDir) by reading a single segment file.
+// It iterates through the file, parsing each record to extract the key and its metadata.
+//
+// Parameters:
+//   segID: The ID of the segment being scanned.
+//   f: An open file handle to the segment file.
+//   keyDir: The map to populate with the index data.
+//
+// Returns:
+//   An error if there is an issue reading the file.
 func scanSegment(segID int, f *os.File, keyDir map[string]Entry) error {
 	var off int64 = 0
 	hdr := make([]byte, headerSize)
@@ -238,6 +292,13 @@ func scanSegment(segID int, f *os.File, keyDir map[string]Entry) error {
 	return nil
 }
 
+// deleteOrphanFiles removes any leftover .compact files that may not have been cleaned up.
+//
+// Parameters:
+//   dir: The directory to scan for orphan files.
+//
+// Returns:
+//   An error if any file cannot be removed.
 func deleteOrphanFiles(dir string) error {
 	ents, err := scanDir(dir)
 	if err != nil {

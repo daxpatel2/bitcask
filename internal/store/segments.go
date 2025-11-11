@@ -9,10 +9,13 @@ import (
 	"sort"
 )
 
+// segmentPath returns the full path for a segment file given a directory and segment ID.
 func segmentPath(dir string, segId int) string {
 	return path.Join(fmt.Sprintf("%s/%06d%s", dir, segId, segmentExt))
 }
 
+// maybeRotate checks if the active segment file has reached its maximum size
+// and rotates it if necessary.
 func maybeRotate(s *FileStore) error {
 	activeSize, err := s.Files[s.ActiveSegID].Seek(0, io.SeekEnd)
 	if err != nil {
@@ -29,6 +32,7 @@ func maybeRotate(s *FileStore) error {
 	return nil
 }
 
+// rotate closes the current active segment file and opens a new one for writing.
 func rotate(s *FileStore) error {
 	// close the active file
 	_ = s.Files[s.ActiveSegID].Close()
@@ -43,9 +47,8 @@ func rotate(s *FileStore) error {
 	return nil
 }
 
-/*
-This function returns a list of all non-active segments which are segIds < ActiveID
-*/
+// nonActiveSegments returns a sorted slice of segment IDs that are not the active segment.
+// These are the segments that are candidates for compaction.
 func nonActiveSegments(fs *FileStore) []int {
 	fs.RWMux.RLock()
 	defer fs.RWMux.RUnlock()
@@ -61,6 +64,7 @@ func nonActiveSegments(fs *FileStore) []int {
 	return segIds
 }
 
+// fileSizeForSegment returns the size of a segment file in bytes.
 func (fs *FileStore) fileSizeForSegment(segId int) (int64, error) {
 	//build the dir
 	segPath := filepath.Join(fs.Path, fmt.Sprintf("%06d%s", segId, segmentExt))
@@ -71,6 +75,8 @@ func (fs *FileStore) fileSizeForSegment(segId int) (int64, error) {
 	return fi.Size(), nil
 }
 
+// liveBytesForSegment calculates the total size of live (not deleted or updated)
+// data in a segment and the number of live keys.
 func (fs *FileStore) liveBytesForSegment(segId int) (live int64, keyCount int) {
 	fs.RWMux.RLock()
 	defer fs.RWMux.RUnlock()
@@ -87,6 +93,7 @@ func (fs *FileStore) liveBytesForSegment(segId int) (live int64, keyCount int) {
 	return total, count
 }
 
+// fileToCompact returns the path to the segment file that is a candidate for compaction.
 func (fs *FileStore) fileToCompact(segId int) string {
 	return segmentPath(fs.Path, segId)
 }
