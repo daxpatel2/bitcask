@@ -300,7 +300,7 @@ func main() {
 					return
 				case <-compTicker.C:
 					t0 := time.Now()
-					if err := runCompactionLoop(s); err != nil {
+					if err := runCompactionLoop(ctx, s); err != nil && !errors.Is(err, context.Canceled) {
 						log.Printf("[compact] error: %v", err)
 						continue
 					}
@@ -472,8 +472,13 @@ func guessStartupMode(dataDir string) string {
 	return "scan"
 }
 
-func runCompactionLoop(fs *store.FileStore) error {
-	for {
+const maxCompactionPasses = 8
+
+func runCompactionLoop(ctx context.Context, fs *store.FileStore) error {
+	for pass := 0; pass < maxCompactionPasses; pass++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		didWork, err := fs.CompactOnce()
 		if err != nil {
 			if errors.Is(err, store.ErrCompactionNotPossible) {
@@ -485,6 +490,7 @@ func runCompactionLoop(fs *store.FileStore) error {
 			return nil
 		}
 	}
+	return nil
 }
 
 func latestSegmentMTime(dir string) (time.Time, error) {
