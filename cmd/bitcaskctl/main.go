@@ -24,28 +24,37 @@ import (
 	"bitcask/internal/store"
 )
 
+// opType defines the type of operation to be performed by the workload generator.
 type opType int
 
 const (
-	opGet opType = iota
-	opPut
-	opDel
+	opGet opType = iota // A read operation.
+	opPut               // A write operation.
+	opDel               // A delete operation.
 )
 
+// metrics holds the performance metrics for the workload.
 type metrics struct {
-	puts        uint64
-	gets        uint64
-	dels        uint64
-	errors      uint64
-	bytesWrite  uint64
-	bytesRead   uint64
-	latencyCh   chan time.Duration // sampled latencies
-	sampleLimit int
-	samples     []time.Duration
-	mu          sync.Mutex
-	start       time.Time
+	puts        uint64             // Total number of successful put operations.
+	gets        uint64             // Total number of successful get operations.
+	dels        uint64             // Total number of successful delete operations.
+	errors      uint64             // Total number of failed operations.
+	bytesWrite  uint64             // Total number of bytes written.
+	bytesRead   uint64             // Total number of bytes read.
+	latencyCh   chan time.Duration // A channel for collecting latency samples.
+	sampleLimit int                // The maximum number of latency samples to store.
+	samples     []time.Duration    // A slice to store latency samples for percentile calculations.
+	mu          sync.Mutex         // A mutex to protect concurrent access to the samples slice.
+	start       time.Time          // The time the workload started.
 }
 
+// newMetrics initializes a new metrics struct.
+//
+// Parameters:
+//   sampleLimit: The maximum number of latency samples to store.
+//
+// Returns:
+//   A pointer to a new metrics struct.
 func newMetrics(sampleLimit int) *metrics {
 	return &metrics{
 		latencyCh:   make(chan time.Duration, 10000),
@@ -54,6 +63,7 @@ func newMetrics(sampleLimit int) *metrics {
 	}
 }
 
+// collector runs in a separate goroutine to collect latency samples.
 func (m *metrics) collector() {
 	for d := range m.latencyCh {
 		m.mu.Lock()
@@ -64,6 +74,8 @@ func (m *metrics) collector() {
 	}
 }
 
+// addLatency adds a latency sample to the collector.
+// It is non-blocking and will drop samples if the channel is full.
 func (m *metrics) addLatency(d time.Duration) {
 	select {
 	case m.latencyCh <- d:
@@ -72,6 +84,7 @@ func (m *metrics) addLatency(d time.Duration) {
 	}
 }
 
+// summary calculates and returns the p50, p95, p99, and average latencies.
 func (m *metrics) summary() (p50, p95, p99, avg time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -92,6 +105,8 @@ func (m *metrics) summary() (p50, p95, p99, avg time.Duration) {
 	return
 }
 
+// main is the entry point for the bitcask benchmark and profiling tool.
+// It provides a configurable workload generator to test the performance of the Bitcask store.
 func main() {
 	// -------- flags ----------
 	dataPath := flag.String("data", "./data", "directory that stores bitcask segment, hint, compact, and temp files")
@@ -393,6 +408,7 @@ func main() {
 
 // -------- helpers --------
 
+// humanBytes converts a byte count into a human-readable string.
 func humanBytes(b uint64) string {
 	const (
 		KB = 1 << 10
@@ -411,6 +427,7 @@ func humanBytes(b uint64) string {
 	}
 }
 
+// randBytes generates a slice of random bytes of a given size.
 func randBytes(r *rand.Rand, n int) []byte {
 	b := make([]byte, n)
 	// generate blocks of uint64 for speed
@@ -427,11 +444,13 @@ func randBytes(r *rand.Rand, n int) []byte {
 	return b
 }
 
+// b2s converts a byte slice to a string.
 func b2s(b []byte) string {
 	// zero-copy conversion is unsafe; keep it safe
 	return string(b)
 }
 
+// newSeed generates a new random seed.
 func newSeed() uint64 {
 	var s uint64
 	_ = binary.Read(cryptoRand.Reader, binary.LittleEndian, &s)
@@ -441,6 +460,7 @@ func newSeed() uint64 {
 	return s
 }
 
+// tickerIntervalSecs returns the duration in seconds.
 func tickerIntervalSecs(d time.Duration) float64 {
 	if d <= 0 {
 		return 1
@@ -448,6 +468,7 @@ func tickerIntervalSecs(d time.Duration) float64 {
 	return d.Seconds()
 }
 
+// errorsIs is a helper function to compare two errors.
 func errorsIs(err error, target error) bool {
 	// allow running even if you defined errors in store package
 	return err != nil && target != nil && err.Error() == target.Error()
@@ -472,8 +493,10 @@ func guessStartupMode(dataDir string) string {
 	return "scan"
 }
 
+// maxCompactionPasses is the maximum number of compaction passes to run in a loop.
 const maxCompactionPasses = 8
 
+// runCompactionLoop runs the compaction process in a loop.
 func runCompactionLoop(ctx context.Context, fs *store.FileStore) error {
 	for pass := 0; pass < maxCompactionPasses; pass++ {
 		if ctx.Err() != nil {
@@ -493,6 +516,7 @@ func runCompactionLoop(ctx context.Context, fs *store.FileStore) error {
 	return nil
 }
 
+// latestSegmentMTime returns the modification time of the latest segment file.
 func latestSegmentMTime(dir string) (time.Time, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -517,6 +541,7 @@ func latestSegmentMTime(dir string) (time.Time, error) {
 	return latest, nil
 }
 
+// totalSegmentBytes returns the total size of all segment files in a directory.
 func totalSegmentBytes(dir string) (uint64, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -536,6 +561,7 @@ func totalSegmentBytes(dir string) (uint64, error) {
 	return total, nil
 }
 
+// isSegmentFile returns true if the file name has a .data extension.
 func isSegmentFile(name string) bool {
 	return strings.HasSuffix(name, ".data")
 }

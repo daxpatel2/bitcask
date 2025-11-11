@@ -9,6 +9,16 @@ import (
 	"path/filepath"
 )
 
+// Put stores a key-value pair in the Bitcask store.
+// It appends the new data to the active segment file.
+// If the value is an empty string, it acts as a "tombstone" for deletion.
+//
+// Parameters:
+//   key: The key under which to store the value.
+//   value: The value to store. An empty string marks the key for deletion.
+//
+// Returns:
+//   An error if the write operation fails, otherwise nil.
 func (fs *FileStore) Put(key string, value string) error {
 	// use a buffer to store the data we want to write to file
 	buf := new(bytes.Buffer)
@@ -74,6 +84,15 @@ func (fs *FileStore) Put(key string, value string) error {
 	return nil
 }
 
+// Open initializes a Bitcask store from a given directory.
+// It scans existing segment files to rebuild the in-memory index (DataMap).
+// If a hint file is present and up-to-date, it will be used for a faster startup.
+//
+// Parameters:
+//   dir: The directory where the data files are stored.
+//
+// Returns:
+//   A pointer to an initialized FileStore and an error if the store cannot be opened.
 func Open(dir string) (*FileStore, error) {
 	files := make(map[int]*os.File)
 	keyDir := make(map[string]Entry)
@@ -148,6 +167,11 @@ func Open(dir string) (*FileStore, error) {
 	}, nil
 }
 
+// Close safely shuts down the FileStore.
+// It writes a hint file to speed up the next startup and closes all segment file handles.
+//
+// Returns:
+//   An error if closing any of the files fails, otherwise nil.
 func (fs *FileStore) Close() error {
 	fs.RWMux.Lock()
 	defer fs.RWMux.Unlock()
@@ -170,6 +194,14 @@ func (fs *FileStore) Close() error {
 	return nil
 }
 
+// Get retrieves the value for a given key from the store.
+// It performs a lookup in the in-memory DataMap and then a single disk read.
+//
+// Parameters:
+//   key: The key to look up.
+//
+// Returns:
+//   The value as a byte slice and an error if the key is not found or a read error occurs.
 func (fs *FileStore) Get(key string) ([]byte, error) {
 	fs.RWMux.RLock()
 	defer fs.RWMux.RUnlock()
@@ -191,6 +223,14 @@ func (fs *FileStore) Get(key string) ([]byte, error) {
 	return buf, nil
 }
 
+// Delete marks a key for deletion by writing a "tombstone" record.
+// This is implemented as a call to Put with an empty string as the value.
+//
+// Parameters:
+//   key: The key to delete.
+//
+// Returns:
+//   An error if the write operation for the tombstone fails, otherwise nil.
 func (fs *FileStore) Delete(key string) error {
 	return fs.Put(key, "")
 }

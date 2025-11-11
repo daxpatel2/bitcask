@@ -9,8 +9,13 @@ import (
 	"path/filepath"
 )
 
-// CompactOnce compacts the oldest sealed segment (segID < ActiveSegID).
-// Returns (didWork, error).
+// CompactOnce compacts the oldest sealed segment (any segment with an ID less than the active segment ID).
+// It rewrites the live data from the selected segment into a new segment file.
+// After successful compaction, it updates the in-memory index, removes the old segment, and writes a new hint file.
+//
+// Returns:
+//   A boolean indicating whether any compaction work was performed.
+//   An error if the compaction process fails at any stage.
 func (fs *FileStore) CompactOnce() (bool, error) {
 	//don't compact if there is only one active file or no files
 	if len(fs.Files) == 0 || fs.ActiveSegID == 1 {
@@ -176,6 +181,14 @@ func (fs *FileStore) CompactOnce() (bool, error) {
 	return true, nil
 }
 
+// SelectCompactCandidate identifies the best segment for compaction.
+// The current strategy is to select the oldest, non-active segment.
+//
+// Parameters:
+//   fs: The FileStore to select a candidate from.
+//
+// Returns:
+//   The segment ID of the candidate and a boolean indicating if a candidate was found.
 func SelectCompactCandidate(fs *FileStore) (candidateID int, ok bool) {
 	segIDs := nonActiveSegments(fs)
 	if len(segIDs) == 0 {
