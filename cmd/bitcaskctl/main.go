@@ -4,6 +4,7 @@ import (
 	"context"
 	cryptoRand "crypto/rand"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -92,7 +94,7 @@ func (m *metrics) summary() (p50, p95, p99, avg time.Duration) {
 
 func main() {
 	// -------- flags ----------
-	dataPath := flag.String("data", "./data/bitcask.data", "path to bitcask data file")
+	dataPath := flag.String("data", "./data", "directory that stores bitcask segment, hint, compact, and temp files")
 	concurrency := flag.Int("concurrency", 8, "number of worker goroutines")
 	duration := flag.Duration("duration", 10*time.Second, "how long to run the workload (use either duration or ops)")
 	ops := flag.Int("ops", 0, "total ops per worker (0 = use duration)")
@@ -118,12 +120,12 @@ func main() {
 	}
 
 	// ensure dir exists
-	if err := os.MkdirAll(filepath.Dir(*dataPath), 0755); err != nil {
+	if err := os.MkdirAll(*dataPath, 0755); err != nil {
 		log.Fatalf("mkdir data dir: %v", err)
 	}
 
 	if *forceScan {
-		hp := *dataPath + ".hint"
+		hp := store.HintPath(*dataPath)
 		_ = os.Remove(hp) // ignore error if not present
 	}
 
@@ -147,12 +149,6 @@ func main() {
 	defer s.Close()
 
 	startupT := time.Now()
-
-	ss, errr := store.Open(*dataPath)
-	if errr != nil {
-		log.Fatalf("open store: %v", errr)
-	}
-	defer ss.Close()
 
 	// Report startup mode & timing
 	if *printStartup {
@@ -304,7 +300,7 @@ func main() {
 					return
 				case <-compTicker.C:
 					t0 := time.Now()
-					if err := s.Compact(); err != nil {
+					if err := runCompactionLoop(s); err != nil {
 						log.Printf("[compact] error: %v", err)
 						continue
 					}
@@ -356,11 +352,9 @@ func main() {
 	qps := float64(total) / elapsed
 	p50, p95, p99, avg := m.summary()
 
-	// file size
-	fi, _ := os.Stat(*dataPath)
-	size := uint64(0)
-	if fi != nil {
-		size = uint64(fi.Size())
+	size, err := totalSegmentBytes(*dataPath)
+	if err != nil {
+		log.Printf("segment size lookup failed: %v", err)
 	}
 
 	fmt.Println("--------- summary ---------")
@@ -461,41 +455,81 @@ func errorsIs(err error, target error) bool {
 
 // guessStartupMode reports whether Open() likely used a hint or scanned.
 // It's a heuristic: if <data>.hint exists and is at least as new as <data>, we say "hint", else "scan".
-func guessStartupMode(dataPath string) string {
-	hint := dataPath + ".hint"
-	dfi, derr := os.Stat(dataPath)
+func guessStartupMode(dataDir string) string {
+	hint := store.HintPath(dataDir)
 	hfi, herr := os.Stat(hint)
+	if herr != nil {
+		return "scan"
+	}
 
-	if derr != nil {
-		// shouldn't happen because we just opened the store
+	latest, err := latestSegmentMTime(dataDir)
+	if err != nil {
 		return "unknown"
 	}
-	if herr != nil {
-		return "scan" // no hint
-	}
-	if !hfi.ModTime().Before(dfi.ModTime()) {
+	if !hfi.ModTime().Before(latest) {
 		return "hint"
 	}
 	return "scan"
 }
 
-func (fs *FileStore) CompactOnceDryRun() string {
-	segID, ok := SelectCompactCandidate(fs)
-	if !ok {
-		return "no sealed segments to compact"
+func runCompactionLoop(fs *store.FileStore) error {
+	for {
+		didWork, err := fs.CompactOnce()
+		if err != nil {
+			if errors.Is(err, store.ErrCompactionNotPossible) {
+				return nil
+			}
+			return err
+		}
+		if !didWork {
+			return nil
+		}
 	}
-	size, err := fs.fileSizeForSegment(segID)
+}
+
+func latestSegmentMTime(dir string) (time.Time, error) {
+	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Sprintf("candidate=%06d.data error=%v", segID, err)
+		return time.Time{}, err
 	}
-	live, keys := fs.liveBytesForSegment(segID)
-	dead := size - live
-	var ratio float64
-	if size > 0 {
-		ratio = float64(dead) / float64(size) * 100.0
+	var latest time.Time
+	for _, ent := range ents {
+		if ent.IsDir() || !isSegmentFile(ent.Name()) {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(dir, ent.Name()))
+		if err != nil {
+			return time.Time{}, err
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
 	}
-	return fmt.Sprintf(
-		"candidate=%06d.data size=%dB live=%dB dead=%dB dead_ratio=%.1f%% keys=%d",
-		segID, size, live, dead, ratio, keys,
-	)
+	if latest.IsZero() {
+		return time.Time{}, fmt.Errorf("no segment files in %s", dir)
+	}
+	return latest, nil
+}
+
+func totalSegmentBytes(dir string) (uint64, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	var total uint64
+	for _, ent := range ents {
+		if ent.IsDir() || !isSegmentFile(ent.Name()) {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(dir, ent.Name()))
+		if err != nil {
+			return 0, err
+		}
+		total += uint64(info.Size())
+	}
+	return total, nil
+}
+
+func isSegmentFile(name string) bool {
+	return strings.HasSuffix(name, ".data")
 }

@@ -1,6 +1,6 @@
 module bitcask
 
-go 1.25
+go 1.22
 
 require (
 	github.com/hashicorp/go-version v1.0.0 // indirect
