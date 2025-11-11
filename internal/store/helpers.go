@@ -114,18 +114,18 @@ func loadHintFile(hintPath string) (map[string]Entry, error) {
 
 // WriteHint writes the current DataMap to <data>.hint under a read lock
 // so writers are paused and the snapshot is consistent.
-func (s *FileStore) WriteHint() error {
-	s.RWMux.RLock()
-	defer s.RWMux.RUnlock()
-	if len(s.Files) == 0 {
+func (fs *FileStore) WriteHint() error {
+	fs.RWMux.RLock()
+	defer fs.RWMux.RUnlock()
+	if len(fs.Files) == 0 {
 		return ErrFileNotOpen
 	}
-	return writeHintFile(hintPath(s.Path), s.DataMap)
+	return writeHintFile(hintPath(fs.Path), fs.DataMap)
 }
 
 // writeHintLocked writes a hint while the caller already holds s.RWMux (write lock).
-func (s *FileStore) writeHintLocked() error {
-	return writeHintFile(hintPath(s.Path), s.DataMap)
+func (fs *FileStore) writeHintLocked() error {
+	return writeHintFile(hintPath(fs.Path), fs.DataMap)
 }
 
 func scanDir(dir string) ([]os.DirEntry, error) {

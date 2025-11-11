@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-func (s *FileStore) Put(key string, value string) error {
+func (fs *FileStore) Put(key string, value string) error {
 	// use a buffer to store the data we want to write to file
 	buf := new(bytes.Buffer)
 	keyLen := uint32(len(key))
@@ -30,10 +30,10 @@ func (s *FileStore) Put(key string, value string) error {
 		return fmt.Errorf("%w,%v", ErrWritingData, err)
 	}
 
-	s.RWMux.Lock()
-	defer s.RWMux.Unlock()
+	fs.RWMux.Lock()
+	defer fs.RWMux.Unlock()
 
-	f := s.Files[s.ActiveSegID]
+	f := fs.Files[fs.ActiveSegID]
 	if f == nil {
 		return ErrFileNotOpen
 	}
@@ -55,19 +55,19 @@ func (s *FileStore) Put(key string, value string) error {
 	}
 
 	if valLen != 0 {
-		s.DataMap[key] = Entry{
+		fs.DataMap[key] = Entry{
 			Size:   int64(len(value)),                            // we can just read entry.Size when reading data from file
 			Offset: offset + int64(headerSize) + int64(len(key)), // where to begin reading data
-			SegID:  s.ActiveSegID,
+			SegID:  fs.ActiveSegID,
 		}
 	} else {
 		// if the value is empty ->"", this is an indication of a tombstone
 		// we need to remove this value from memory
-		delete(s.DataMap, key)
+		delete(fs.DataMap, key)
 	}
 
 	// rotation after a successful write return nil if success, err otherwise
-	if err := maybeRotate(s); err != nil {
+	if err := maybeRotate(fs); err != nil {
 		return err
 	}
 	// everything succeeded return out
@@ -96,7 +96,7 @@ func Open(dir string) (*FileStore, error) {
 			Files:       files,
 			ActiveSegID: segId,
 			NextSegID:   2,
-			Path:        p,
+			Path:        dir,
 		}, nil
 	}
 
@@ -148,37 +148,37 @@ func Open(dir string) (*FileStore, error) {
 	}, nil
 }
 
-func (s *FileStore) Close() error {
-	s.RWMux.Lock()
-	defer s.RWMux.Unlock()
+func (fs *FileStore) Close() error {
+	fs.RWMux.Lock()
+	defer fs.RWMux.Unlock()
 
-	_ = s.writeHintLocked()
+	_ = fs.writeHintLocked()
 
-	for segId, f := range s.Files {
+	for segId, f := range fs.Files {
 		if f != nil {
 			if err := f.Close(); err != nil {
 				return ErrClosingFile
 			}
-			s.Files[segId] = nil
+			fs.Files[segId] = nil
 		}
 	}
 
-	s.DataMap = nil
-	s.Files = nil
-	s.Path = ""
+	fs.DataMap = nil
+	fs.Files = nil
+	fs.Path = ""
 
 	return nil
 }
 
-func (s *FileStore) Get(key string) ([]byte, error) {
-	s.RWMux.RLock()
-	defer s.RWMux.RUnlock()
-	entry, ok := s.DataMap[key]
+func (fs *FileStore) Get(key string) ([]byte, error) {
+	fs.RWMux.RLock()
+	defer fs.RWMux.RUnlock()
+	entry, ok := fs.DataMap[key]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
 
-	f := s.Files[entry.SegID]
+	f := fs.Files[entry.SegID]
 	if f == nil {
 		return nil, ErrFileNotOpen
 	}
@@ -191,6 +191,6 @@ func (s *FileStore) Get(key string) ([]byte, error) {
 	return buf, nil
 }
 
-func (s *FileStore) Delete(key string) error {
-	return s.Put(key, "")
+func (fs *FileStore) Delete(key string) error {
+	return fs.Put(key, "")
 }

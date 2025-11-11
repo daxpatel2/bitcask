@@ -8,117 +8,178 @@ import (
 	"os"
 )
 
-func (s *FileStore) Compact() error {
-	// lock mu to pause any operations new writes while we compact
-	s.RWMux.Lock()
-	defer s.RWMux.Unlock()
-
-	if s.Files[s.ActiveSegID] == nil {
-		return ErrFileNotOpen
+// CompactOnce compacts the oldest sealed segment (segID < ActiveSegID).
+// Returns (didWork, error).
+func (fs *FileStore) CompactOnce() (bool, error) {
+	//don't compact if there is only one active file or no files
+	if len(fs.Files) == 0 || fs.ActiveSegID == 1 {
+		return false, ErrCompactionNotPossible
 	}
 
-	// 1) Create temp file in the SAME directory for atomic rename.
-	tmpPath := s.Path + ".compact"
+	fs.RWMux.RLock()
+	// find the candidate to compact
+	candId, ok := SelectCompactCandidate(fs)
+	if !ok {
+		fs.RWMux.RUnlock()
+		return false, ErrCompactionNotPossible
+	}
+
+	// get all the data inside the canidate file
+	plan := make(map[string]Entry)
+	//take a snapshot of the entries inside the canidate file
+	for key, entry := range fs.DataMap {
+		// if entry lives in the canidate file, we need to account for it
+		if entry.SegID == candId {
+			plan[key] = entry
+		}
+	}
+
+	candFile := fs.Files[candId]
+	dir := fs.Path
+	fs.RWMux.RUnlock()
+
+	if candFile == nil {
+		// candidate disappeared (e.g., closed elsewhere); nothing to do
+		return false, nil
+	}
+
+	//new in mem map size equal to plan
+	wroteAnything := false
+	newKeyDir := make(map[string]Entry, len(plan))
+
+	// 1) Create temp file in the SAME directory
+	tmpPath := fs.Path + ".compact"
 	tmpFile, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to open file %s: %w", tmpPath, err)
+		return false, ErrOpeningFile
 	}
 
-	//new in mem map
-	newKeyDir := make(map[string]Entry, len(s.DataMap))
-	// loop through the current open file
-	for key, entry := range s.DataMap {
-		// Read the current value directly from the old file using stored offsets.
-		val := make([]byte, entry.Size)
-		if entry.Size > 0 {
-			if _, err := s.Files[s.ActiveSegID].ReadAt(val, entry.Offset); err != nil && err != io.EOF {
+	var off int64 = 0
+	// loop through the plan and write it to the compact
+	for k, e := range plan {
+		// Read the current value directly from the seg file using stored offsets.
+		val := make([]byte, e.Size)
+		if e.Size > 0 {
+			if _, err := candFile.ReadAt(val, e.Offset); err != nil && err != io.EOF {
 				_ = tmpFile.Close()
-				return fmt.Errorf("read value for key %q: %w", key, err)
+				return false, fmt.Errorf("read value for key %q: %w", k, err)
 			}
 		}
 
 		// Prepare one record: [keyLen][valLen][key][value]=empty is tombstone.
-		keyBytes := []byte(key)
+		keyBytes := []byte(k)
 		keyLen := uint32(len(keyBytes))
 		valLen := uint32(len(val))
-
-		// Find where we'll write in the temp file (to compute value offset).
-		off, err := tmpFile.Seek(0, io.SeekEnd)
-		if err != nil {
-			_ = tmpFile.Close()
-			return fmt.Errorf("seek compact file EOF: %w", err)
-		}
-
 		buf := new(bytes.Buffer)
 
 		if err := binary.Write(buf, binary.LittleEndian, keyLen); err != nil {
 			_ = tmpFile.Close()
-			return fmt.Errorf("write keyLen: %w", err)
+			return false, ErrWritingData
 		}
 		if err := binary.Write(buf, binary.LittleEndian, valLen); err != nil {
 			_ = tmpFile.Close()
-			return fmt.Errorf("write valLen: %w", err)
+			return false, ErrWritingData
 		}
 		if _, err := buf.Write(keyBytes); err != nil {
 			_ = tmpFile.Close()
-			return fmt.Errorf("write key bytes: %w", err)
+			return false, ErrWritingData
 		}
+
 		if valLen > 0 {
 			if _, err := buf.Write(val); err != nil {
 				_ = tmpFile.Close()
-				return fmt.Errorf("write value bytes: %w", err)
+				_ = os.Remove(tmpPath)
+				return false, ErrWritingData
 			}
 		}
 
-		if _, err := tmpFile.Write(buf.Bytes()); err != nil {
+		n, err := tmpFile.Write(buf.Bytes())
+		if err != nil {
 			_ = tmpFile.Close()
-			return fmt.Errorf("append compact record: %w", err)
+			_ = os.Remove(tmpPath)
+			return false, fmt.Errorf("append compact record: %w", err)
 		}
-		if err := tmpFile.Sync(); err != nil {
+
+		if n != len(buf.Bytes()) {
 			_ = tmpFile.Close()
-			return fmt.Errorf("sync compact record: %w", err)
+			_ = os.Remove(tmpPath)
+			return false, fmt.Errorf("short write to %s", tmpPath)
 		}
 
 		// Record new value location in the compacted file.
-		newValOffset := off + headerSize + int64(len(keyBytes))
-		newKeyDir[key] = Entry{Offset: newValOffset, Size: int64(valLen)}
+		newValOffset := off + int64(headerSize) + int64(len(keyBytes))
+		newKeyDir[k] = Entry{Offset: newValOffset, Size: int64(valLen), SegID: fs.NextSegID}
+		off += int64(n)
+		wroteAnything = true
 	}
 
-	// 3) Finish temp writes.
 	if err := tmpFile.Sync(); err != nil {
 		_ = tmpFile.Close()
-		return fmt.Errorf("final sync compact file: %w", err)
+		_ = os.Remove(tmpPath)
+		return false, ErrCompactionNotPossible
 	}
 	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close compact file: %w", err)
+		_ = os.Remove(tmpPath)
+		return false, ErrClosingFile
+	}
+	// 4) Commit under a short write lock.
+	fs.RWMux.Lock()
+	defer fs.RWMux.Unlock()
+	// If candidate is no longer sealed, abort.
+	if candId >= fs.ActiveSegID {
+		_ = os.Remove(tmpPath)
+		return false, nil
 	}
 
-	// 4) Close old file
-	if err := s.Files[s.ActiveSegID].Close(); err != nil {
-		return fmt.Errorf("close old file: %w", err)
-	}
-
-	// 5) Atomically replace old with compacted file.
-	//    (On same filesystem, Rename is atomic.)
-	if err := os.Rename(tmpPath, s.Path); err != nil {
-		// Best-effort recovery: try to reopen the old file so the store remains usable.
-		if f, openErr := os.OpenFile(s.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644); openErr == nil {
-			s.Files[s.ActiveSegID] = f
+	if !wroteAnything {
+		_ = os.Remove(tmpPath)
+		if f := fs.Files[candId]; f != nil {
+			_ = f.Close()
+			delete(fs.Files, candId)
 		}
-		return fmt.Errorf("rename compact file: %w", err)
+		_ = os.Remove(segmentPath(dir, candId))
+		_ = fs.writeHintLocked() // best-effort
+		return true, nil
 	}
 
-	// 6) Reopen the new canonical file and swap in the new index.
-	f, err := os.OpenFile(s.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	finalPath := segmentPath(dir, fs.NextSegID)
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return false, fmt.Errorf("rename compact file: %w", err)
+	}
+
+	// Open the new compacted segment as sealed (RO) and register it.
+	newF, err := os.OpenFile(finalPath, os.O_RDONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("reopen compacted file: %w", err)
+		return false, fmt.Errorf("open compacted segment: %w", err)
 	}
-	s.Files[s.ActiveSegID] = f
-	s.DataMap = newKeyDir
+	fs.Files[fs.NextSegID] = newF
 
-	if err := s.writeHintLocked(); err != nil {
-		//nothing
+	// Update DataMap for keys that STILL point to the candidate seg.
+	for k, ne := range newKeyDir {
+		cur, ok := fs.DataMap[k]
+		if ok && cur.SegID == candId {
+			fs.DataMap[k] = ne
+		}
 	}
+	// Remove the old candidate file.
+	if f := fs.Files[candId]; f != nil {
+		_ = f.Close()
+		delete(fs.Files, candId)
+	}
+	_ = os.Remove(segmentPath(dir, candId))
 
-	return nil
+	// Advance segment id counter, refresh hint best-effort.
+	fs.NextSegID++
+	_ = fs.writeHintLocked()
+
+	return true, nil
+}
+
+func SelectCompactCandidate(fs *FileStore) (candidateID int, ok bool) {
+	segIDs := nonActiveSegments(fs)
+	if len(segIDs) == 0 {
+		return 0, false
+	}
+	return segIDs[0], true // oldest (smallest segID)
 }

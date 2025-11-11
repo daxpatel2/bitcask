@@ -478,3 +478,24 @@ func guessStartupMode(dataPath string) string {
 	}
 	return "scan"
 }
+
+func (fs *FileStore) CompactOnceDryRun() string {
+	segID, ok := SelectCompactCandidate(fs)
+	if !ok {
+		return "no sealed segments to compact"
+	}
+	size, err := fs.fileSizeForSegment(segID)
+	if err != nil {
+		return fmt.Sprintf("candidate=%06d.data error=%v", segID, err)
+	}
+	live, keys := fs.liveBytesForSegment(segID)
+	dead := size - live
+	var ratio float64
+	if size > 0 {
+		ratio = float64(dead) / float64(size) * 100.0
+	}
+	return fmt.Sprintf(
+		"candidate=%06d.data size=%dB live=%dB dead=%dB dead_ratio=%.1f%% keys=%d",
+		segID, size, live, dead, ratio, keys,
+	)
+}
