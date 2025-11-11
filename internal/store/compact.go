@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // CompactOnce compacts the oldest sealed segment (segID < ActiveSegID).
@@ -35,7 +36,6 @@ func (fs *FileStore) CompactOnce() (bool, error) {
 	}
 
 	candFile := fs.Files[candId]
-	dir := fs.Path
 	fs.RWMux.RUnlock()
 
 	if candFile == nil {
@@ -47,8 +47,8 @@ func (fs *FileStore) CompactOnce() (bool, error) {
 	wroteAnything := false
 	newKeyDir := make(map[string]Entry, len(plan))
 
-	// 1) Create temp file in the SAME directory
-	tmpPath := fs.Path + ".compact"
+	// 1) Create temp file in the SAME directory(data dir)
+	tmpPath := filepath.Join(fs.Path, fmt.Sprintf("%06d%s", fs.NextSegID, tmpExtension))
 	tmpFile, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return false, ErrOpeningFile
@@ -137,12 +137,12 @@ func (fs *FileStore) CompactOnce() (bool, error) {
 			_ = f.Close()
 			delete(fs.Files, candId)
 		}
-		_ = os.Remove(segmentPath(dir, candId))
+		_ = os.Remove(segmentPath(fs.Path, candId))
 		_ = fs.writeHintLocked() // best-effort
 		return true, nil
 	}
 
-	finalPath := segmentPath(dir, fs.NextSegID)
+	finalPath := segmentPath(fs.Path, fs.NextSegID)
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return false, fmt.Errorf("rename compact file: %w", err)
@@ -167,7 +167,7 @@ func (fs *FileStore) CompactOnce() (bool, error) {
 		_ = f.Close()
 		delete(fs.Files, candId)
 	}
-	_ = os.Remove(segmentPath(dir, candId))
+	_ = os.Remove(segmentPath(fs.Path, candId))
 
 	// Advance segment id counter, refresh hint best-effort.
 	fs.NextSegID++

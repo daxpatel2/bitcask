@@ -254,7 +254,7 @@ func deleteOrphanFiles(dir string) error {
 		if !strings.HasSuffix(name, compactExt) {
 			continue
 		}
-		if err := os.Remove(name); err != nil {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("remove file %s: %w", name, err)
 		}
 		fmt.Printf("removed file %s\n", name)

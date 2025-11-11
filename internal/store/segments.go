@@ -14,7 +14,6 @@ func segmentPath(dir string, segId int) string {
 }
 
 func maybeRotate(s *FileStore) error {
-
 	activeSize, err := s.Files[s.ActiveSegID].Seek(0, io.SeekEnd)
 	if err != nil {
 		return ErrSeekingIO
@@ -89,5 +88,5 @@ func (fs *FileStore) liveBytesForSegment(segId int) (live int64, keyCount int) {
 }
 
 func (fs *FileStore) fileToCompact(segId int) string {
-	return filepath.Join(fs.Path, fmt.Sprintf("%06d%s", segId, segmentExt))
+	return segmentPath(fs.Path, segId)
 }
